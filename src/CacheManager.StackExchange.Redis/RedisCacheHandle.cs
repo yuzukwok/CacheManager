@@ -1,14 +1,22 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
 using CacheManager.Core;
 using CacheManager.Core.Internal;
+using CacheManager.Core.Logging;
 using static CacheManager.Core.Utility.Guard;
 using StackRedis = StackExchange.Redis;
 
 namespace CacheManager.Redis
 {
+    internal enum ScriptType
+    {
+        Put,
+        Add,
+        Update,
+        Get
+    }
+
     /// <summary>
     /// Cache handle implementation for Redis.
     /// </summary>
@@ -16,33 +24,81 @@ namespace CacheManager.Redis
     public class RedisCacheHandle<TCacheValue> : BaseCacheHandle<TCacheValue>
     {
         private const string HashFieldCreated = "created";
-
-        // expiration mode enum stored as int
         private const string HashFieldExpirationMode = "expiration";
-
-        // expiration timeout stored as long
         private const string HashFieldExpirationTimeout = "timeout";
-
         private const string HashFieldType = "type";
-
-        // the object value
         private const string HashFieldValue = "value";
 
+        private static readonly string ScriptAdd = $@"
+if redis.call('HSETNX', KEYS[1], '{HashFieldValue}', ARGV[1]) == 1 then
+    local result=redis.call('HMSET', KEYS[1], '{HashFieldType}', ARGV[2], '{HashFieldExpirationMode}', ARGV[3], '{HashFieldExpirationTimeout}', ARGV[4], '{HashFieldCreated}', ARGV[5])
+    if ARGV[3] ~= '0' and ARGV[4] ~= '0' then
+        redis.call('PEXPIRE', KEYS[1], ARGV[4])
+    else
+        redis.call('PERSIST', KEYS[1])
+    end
+    return result
+else
+    return nil
+end";
+
+        private static readonly string ScriptPut = $@"
+local result=redis.call('HMSET', KEYS[1], '{HashFieldValue}', ARGV[1], '{HashFieldType}', ARGV[2], '{HashFieldExpirationMode}', ARGV[3], '{HashFieldExpirationTimeout}', ARGV[4], '{HashFieldCreated}', ARGV[5])
+if ARGV[3] ~= '0' and ARGV[4] ~= '0' then
+    redis.call('PEXPIRE', KEYS[1], ARGV[4])
+else
+    redis.call('PERSIST', KEYS[1])
+end
+return result";
+
+        private static readonly string ScriptUpdate = $@"
+if redis.call('HGET', KEYS[1], '{HashFieldValue}') == ARGV[2] then
+    return redis.call('HSET', KEYS[1], '{HashFieldValue}', ARGV[1])
+else
+    return nil
+end";
+
+        private static readonly string ScriptGet = $@"
+local result = redis.call('HMGET', KEYS[1], '{HashFieldValue}', '{HashFieldExpirationMode}', '{HashFieldExpirationTimeout}', '{HashFieldCreated}', '{HashFieldType}')
+if (result[2] and result[2] == '1') then
+    if (result[3] and result[3] ~= '' and result[3] ~= '0') then
+        redis.call('PEXPIRE', KEYS[1], result[3])
+    end
+end
+return result";
+
+        private readonly IDictionary<ScriptType, StackRedis.LoadedLuaScript> shaScripts = new Dictionary<ScriptType, StackRedis.LoadedLuaScript>();
+        private readonly CacheManagerConfiguration managerConfiguration;
         private readonly RedisValueConverter valueConverter;
-        private StackRedis.IDatabase database = null;
+        private readonly RedisConnectionManager connection;
+        private readonly bool isLuaAllowed = true;
         private RedisConfiguration redisConfiguration = null;
+
+        // flag if scripts are initially loaded to the server
+        private bool scriptsLoaded = false;
+        private object lockObject = new object();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RedisCacheHandle{TCacheValue}"/> class.
         /// </summary>
-        /// <param name="manager">The manager.</param>
-        /// <param name="configuration">The configuration.</param>
-        public RedisCacheHandle(ICacheManager<TCacheValue> manager, CacheHandleConfiguration configuration)
-            : base(manager, configuration)
+        /// <param name="managerConfiguration">The manager configuration.</param>
+        /// <param name="configuration">The cache handle configuration.</param>
+        /// <param name="loggerFactory">The logger factory.</param>
+        /// <param name="serializer">The serializer.</param>
+        public RedisCacheHandle(CacheManagerConfiguration managerConfiguration, CacheHandleConfiguration configuration, ILoggerFactory loggerFactory, ICacheSerializer serializer)
+            : base(managerConfiguration, configuration)
         {
-            NotNull(manager, nameof(manager));
-            EnsureNotNull(manager.Configuration.CacheSerializer, "A cache serializer must be defined for this cache handle.");
-            this.valueConverter = new RedisValueConverter(manager.Configuration.CacheSerializer);
+            NotNull(loggerFactory, nameof(loggerFactory));
+            NotNull(managerConfiguration, nameof(managerConfiguration));
+            NotNull(configuration, nameof(configuration));
+            EnsureNotNull(serializer, "A serializer is required for the redis cache handle");
+
+            this.managerConfiguration = managerConfiguration;
+            this.Logger = loggerFactory.CreateLogger(this);
+            this.valueConverter = new RedisValueConverter(serializer);
+            this.redisConfiguration = RedisConfigurations.GetConfiguration(configuration.Key);
+            this.connection = new RedisConnectionManager(this.redisConfiguration, loggerFactory);
+            this.isLuaAllowed = this.connection.Features.Scripting;
         }
 
         /// <summary>
@@ -54,60 +110,48 @@ namespace CacheManager.Redis
         {
             get
             {
-                var server = this.GetServers(this.Connection).First(p => !p.IsSlave && p.IsConnected);
-                if (server == null)
+                var count = 0;
+                foreach (var server in this.Servers.Where(p => !p.IsSlave && p.IsConnected))
                 {
-                    throw new InvalidOperationException("No active master found.");
+                    count += (int)server.DatabaseSize(this.redisConfiguration.Database);
                 }
 
-                // aprox size, only size on the master..
-                return (int)server.DatabaseSize(this.RedisConfiguration.Database);
+                // approx size, only size on the master..
+                return count;
             }
         }
 
-        private StackRedis.ConnectionMultiplexer Connection => RedisConnectionPool.Connect(this.RedisConfiguration);
+#pragma warning disable CS3003 // Type is not CLS-compliant
+        /// <summary>
+        /// Gets the servers.
+        /// </summary>
+        /// <value>The list of servers.</value>
+        public IEnumerable<StackRedis.IServer> Servers => this.connection.Servers;
 
-        private StackRedis.IDatabase Database
-        {
-            get
-            {
-                if (this.database == null)
-                {
-                    this.Retry(() =>
-                    {
-                        this.database = this.Connection.GetDatabase(this.RedisConfiguration.Database);
+        /// <summary>
+        /// Gets the features the redis server supports.
+        /// </summary>
+        /// <value>The server features.</value>
+        public StackRedis.RedisFeatures Features => this.connection.Features;
+#pragma warning restore CS3003 // Type is not CLS-compliant
 
-                        this.database.Ping();
-                    });
-                }
-
-                return this.database;
-            }
-        }
-
-        private RedisConfiguration RedisConfiguration
-        {
-            get
-            {
-                if (this.redisConfiguration == null)
-                {
-                    // throws an exception if not found for the name
-                    this.redisConfiguration = RedisConfigurations.GetConfiguration(this.Configuration.HandleName);
-                }
-
-                return this.redisConfiguration;
-            }
-        }
+        /// <inheritdoc />
+        protected override ILogger Logger { get; }
 
         /// <summary>
         /// Clears this cache, removing all items in the base cache and all regions.
         /// </summary>
         public override void Clear()
         {
-            foreach (var server in this.GetServers(this.Connection)
-                .Where(p => !p.IsSlave))
+            foreach (var server in this.Servers.Where(p => !p.IsSlave))
             {
-                server.FlushDatabase(this.RedisConfiguration.Database);
+                this.Retry(() =>
+                {
+                    if (server.IsConnected)
+                    {
+                        server.FlushDatabase(this.redisConfiguration.Database);
+                    }
+                });
             }
         }
 
@@ -120,86 +164,78 @@ namespace CacheManager.Redis
             this.Retry(() =>
             {
                 // we are storing all keys stored in the region in the hash for key=region
-                var hashKeys = this.Database.HashKeys(region);
+                var hashKeys = this.connection.Database.HashKeys(region);
 
                 if (hashKeys.Length > 0)
                 {
                     // lets remove all keys which where in the region
-                    var keys = hashKeys.Where(p => p.HasValue).Select(p => (StackRedis.RedisKey)GetKey(p, region)).ToArray();
-                    this.Database.KeyDelete(keys);
+                    // 01/32/16 changed to remove one by one because on clusters the keys could belong to multiple slots
+                    foreach (var key in hashKeys.Where(p => p.HasValue))
+                    {
+                        this.connection.Database.KeyDelete(key.ToString(), StackRedis.CommandFlags.FireAndForget);
+                    }
                 }
 
                 // now delete the region
-                this.Database.KeyDelete(region);
+                this.connection.Database.KeyDelete(region);
             });
         }
 
-        /// <summary>
-        /// Gets the servers.
-        /// </summary>
-        /// <param name="muxer">The muxer.</param>
-        /// <returns>The list of servers.</returns>
-        public IEnumerable<StackRedis.IServer> GetServers(StackRedis.ConnectionMultiplexer muxer)
+        /// <inheritdoc />
+        public override UpdateItemResult<TCacheValue> Update(string key, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
+            => this.Update(key, null, updateValue, maxRetries);
+
+        /// <inheritdoc />
+        public override UpdateItemResult<TCacheValue> Update(string key, string region, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
         {
-            EndPoint[] endpoints = muxer.GetEndPoints();
-            foreach (var endpoint in endpoints)
+            if (!this.isLuaAllowed)
             {
-                var server = muxer.GetServer(endpoint);
-                yield return server;
+                return this.UpdateNoScript(key, region, updateValue, maxRetries);
             }
+
+            var tries = 0;
+            var fullKey = GetKey(key, region);
+
+            return this.Retry(() =>
+            {
+                do
+                {
+                    tries++;
+
+                    var item = this.GetCacheItemInternal(key, region);
+
+                    if (item == null)
+                    {
+                        return UpdateItemResult.ForItemDidNotExist<TCacheValue>();
+                    }
+
+                    var oldValue = this.ToRedisValue(item.Value);
+
+                    // run update
+                    var newValue = updateValue(item.Value);
+
+                    var result = this.Eval(ScriptType.Update, fullKey, new[]
+                    {
+                        this.ToRedisValue(newValue),
+                        oldValue
+                    });
+
+                    if (result != null && !result.IsNull)
+                    {
+                        return UpdateItemResult.ForSuccess(newValue, tries > 1, tries);
+                    }
+
+                    this.Logger.LogDebug("Update of {0} {1} failed with version conflict, retrying {2}/{3}", key, region, tries, maxRetries);
+                }
+                while (tries <= maxRetries);
+
+                this.Logger.LogWarn("Update of {0} {1} failed with version conflict exiting because of too many retries.", key, region);
+                return UpdateItemResult.ForTooManyRetries<TCacheValue>(tries);
+            });
         }
 
-        /// <summary>
-        /// Updates an existing key in the cache.
-        /// <para>
-        /// The cache manager will make sure the update will always happen on the most recent version.
-        /// </para>
-        /// <para>
-        /// If version conflicts occur, if for example multiple cache clients try to write the same
-        /// key, and during the update process, someone else changed the value for the key, the
-        /// cache manager will retry the operation.
-        /// </para>
-        /// <para>
-        /// The <paramref name="updateValue"/> function will get invoked on each retry with the most
-        /// recent value which is stored in cache.
-        /// </para>
-        /// </summary>
-        /// <param name="key">The key to update.</param>
-        /// <param name="updateValue">The function to perform the update.</param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
-        /// <returns>The update result which is interpreted by the cache manager.</returns>
-        /// <remarks>
-        /// If the cache does not use a distributed cache system. Update is doing exactly the same
-        /// as Get plus Put.
-        /// </remarks>
-        public override UpdateItemResult<TCacheValue> Update(string key, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config) =>
-            this.Update(key, null, updateValue, config);
-
-        /// <summary>
-        /// Updates an existing key in the cache.
-        /// <para>
-        /// The cache manager will make sure the update will always happen on the most recent version.
-        /// </para>
-        /// <para>
-        /// If version conflicts occur, if for example multiple cache clients try to write the same
-        /// key, and during the update process, someone else changed the value for the key, the
-        /// cache manager will retry the operation.
-        /// </para>
-        /// <para>
-        /// The <paramref name="updateValue"/> function will get invoked on each retry with the most
-        /// recent value which is stored in cache.
-        /// </para>
-        /// </summary>
-        /// <param name="key">The key to update.</param>
-        /// <param name="region">The cache region.</param>
-        /// <param name="updateValue">The function to perform the update.</param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
-        /// <returns>The update result which is interpreted by the cache manager.</returns>
-        /// <remarks>
-        /// If the cache does not use a distributed cache system. Update is doing exactly the same
-        /// as Get plus Put.
-        /// </remarks>
-        public override UpdateItemResult<TCacheValue> Update(string key, string region, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config)
+#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
+        protected UpdateItemResult<TCacheValue> UpdateNoScript(string key, string region, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
         {
             var committed = false;
             var tries = 0;
@@ -220,7 +256,7 @@ namespace CacheManager.Redis
 
                     var oldValue = this.ToRedisValue(item.Value);
 
-                    var tran = this.Database.CreateTransaction();
+                    var tran = this.connection.Database.CreateTransaction();
                     tran.AddCondition(StackRedis.Condition.HashEqual(fullKey, HashFieldValue, oldValue));
 
                     // run update
@@ -234,21 +270,13 @@ namespace CacheManager.Redis
                     {
                         return UpdateItemResult.ForSuccess<TCacheValue>(newValue, tries > 1, tries);
                     }
-                    else
-                    {
-                        //// just for debugging one bug in the redis client
-                        //// var checkItem = this.GetCacheItemInternal(key, region);
-                        //// if (newValue.Equals(checkItem.Value))
-                        //// {
-                        ////     throw new InvalidOperationException("Updated although not committed.");
-                        //// }
-                    }
                 }
-                while (committed == false && tries <= config.MaxRetries);
+                while (committed == false && tries <= maxRetries);
 
                 return UpdateItemResult.ForTooManyRetries<TCacheValue>(tries);
             });
         }
+#pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
 
         /// <summary>
         /// Adds a value to the cache.
@@ -263,14 +291,21 @@ namespace CacheManager.Redis
         /// <c>true</c> if the key was not already added to the cache, <c>false</c> otherwise.
         /// </returns>
         protected override bool AddInternalPrepared(CacheItem<TCacheValue> item) =>
-            this.Set(item, StackRedis.When.NotExists, true);
+            this.Retry(() => this.Set(item, StackRedis.When.NotExists, true));
 
         /// <summary>
         /// Performs application-defined tasks associated with freeing, releasing, or resetting
         /// unmanaged resources.
         /// </summary>
         /// <param name="disposeManaged">Indicator if managed resources should be released.</param>
-        protected override void Dispose(bool disposeManaged) => base.Dispose(disposeManaged);
+        protected override void Dispose(bool disposeManaged)
+        {
+            base.Dispose(disposeManaged);
+            if (disposeManaged)
+            {
+                this.connection.RemoveConnection();
+            }
+        }
 
         /// <summary>
         /// Gets a <c>CacheItem</c> for the specified key.
@@ -289,13 +324,72 @@ namespace CacheManager.Redis
         /// <returns>The <c>CacheItem</c>.</returns>
         protected override CacheItem<TCacheValue> GetCacheItemInternal(string key, string region)
         {
+            if (!this.isLuaAllowed)
+            {
+                return this.GetCacheItemInternalNoScript(key, region);
+            }
+
+            return this.Retry(() =>
+            {
+                var fullKey = GetKey(key, region);
+
+                var result = this.Eval(ScriptType.Get, fullKey);
+                if (result == null || result.IsNull)
+                {
+                    // something went wrong. HMGET should return at least a null result for each requested field
+                    throw new InvalidOperationException("Error retrieving " + fullKey);
+                }
+
+                var values = (StackRedis.RedisValue[])result;
+
+                // the first item stores the value
+                var item = values[0];
+                var expirationModeItem = values[1];
+                var timeoutItem = values[2];
+                var createdItem = values[3];
+                var valueTypeItem = values[4];
+
+                if (!item.HasValue || !valueTypeItem.HasValue /* partially removed? */
+                    || item.IsNullOrEmpty || item.IsNull)
+                {
+                    return null;
+                }
+
+                var expirationMode = ExpirationMode.None;
+                var expirationTimeout = default(TimeSpan);
+
+                // checking if the expiration mode is set on the hash
+                if (expirationModeItem.HasValue && timeoutItem.HasValue)
+                {
+                    expirationMode = (ExpirationMode)(int)expirationModeItem;
+                    expirationTimeout = TimeSpan.FromMilliseconds((long)timeoutItem);
+                }
+
+                var value = this.FromRedisValue(item, (string)valueTypeItem);
+
+                var cacheItem = string.IsNullOrWhiteSpace(region) ?
+                        new CacheItem<TCacheValue>(key, value, expirationMode, expirationTimeout) :
+                        new CacheItem<TCacheValue>(key, region, value, expirationMode, expirationTimeout);
+
+                if (createdItem.HasValue)
+                {
+                    cacheItem = cacheItem.WithCreated(new DateTime((long)createdItem));
+                }
+
+                return cacheItem;
+            });
+        }
+
+#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
+        protected CacheItem<TCacheValue> GetCacheItemInternalNoScript(string key, string region)
+        {
             return this.Retry(() =>
             {
                 var fullKey = GetKey(key, region);
 
                 // getting both, the value and, if exists, the expiration mode. if that one is set
                 // and it is sliding, we also retrieve the timeout later
-                var values = this.Database.HashGet(
+                var values = this.connection.Database.HashGet(
                     fullKey,
                     new StackRedis.RedisValue[]
                     {
@@ -326,7 +420,7 @@ namespace CacheManager.Redis
                 if (expirationModeItem.HasValue && timeoutItem.HasValue)
                 {
                     expirationMode = (ExpirationMode)(int)expirationModeItem;
-                    expirationTimeout = TimeSpan.FromTicks((long)timeoutItem);
+                    expirationTimeout = TimeSpan.FromMilliseconds((long)timeoutItem);
                 }
 
                 var value = this.FromRedisValue(item, (string)valueTypeItem);
@@ -343,12 +437,13 @@ namespace CacheManager.Redis
                 // update sliding
                 if (expirationMode == ExpirationMode.Sliding && expirationTimeout != default(TimeSpan))
                 {
-                    this.Database.KeyExpire(fullKey, cacheItem.ExpirationTimeout, StackRedis.CommandFlags.FireAndForget);
+                    this.connection.Database.KeyExpire(fullKey, cacheItem.ExpirationTimeout, StackRedis.CommandFlags.FireAndForget);
                 }
 
                 return cacheItem;
             });
         }
+#pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
 #pragma warning restore CSE0003
 
         /// <summary>
@@ -365,7 +460,7 @@ namespace CacheManager.Redis
         /// </summary>
         /// <param name="item">The <c>CacheItem</c> to be added to the cache.</param>
         protected override void PutInternalPrepared(CacheItem<TCacheValue> item) =>
-            this.Set(item, StackRedis.When.Always, false);
+            this.Retry(() => this.Set(item, StackRedis.When.Always, false));
 
         /// <summary>
         /// Removes a value from the cache for the specified key.
@@ -389,15 +484,16 @@ namespace CacheManager.Redis
         {
             return this.Retry(() =>
             {
+                var fullKey = GetKey(key, region);
+
                 // clean up region
                 if (!string.IsNullOrWhiteSpace(region))
                 {
-                    this.Database.HashDelete(region, key, StackRedis.CommandFlags.FireAndForget);
+                    this.connection.Database.HashDelete(region, fullKey, StackRedis.CommandFlags.FireAndForget);
                 }
 
                 // remove key
-                var fullKey = GetKey(key, region);
-                var result = this.Database.KeyDelete(fullKey);
+                var result = this.connection.Database.KeyDelete(fullKey);
 
                 return result;
             });
@@ -444,7 +540,7 @@ namespace CacheManager.Redis
         }
 
         private T Retry<T>(Func<T> retryme) =>
-            RetryHelper.Retry(retryme, this.Manager.Configuration.RetryTimeout, this.Manager.Configuration.MaxRetries);
+            RetryHelper.Retry(retryme, this.managerConfiguration.RetryTimeout, this.managerConfiguration.MaxRetries, this.Logger);
 
         private void Retry(Action retryme)
             => this.Retry<bool>(
@@ -454,10 +550,86 @@ namespace CacheManager.Redis
                     return true;
                 });
 
-#pragma warning disable CSE0003
         private bool Set(CacheItem<TCacheValue> item, StackRedis.When when, bool sync = false)
         {
-            // TODO: move the whole logic into a script to make it atomic
+            if (!this.isLuaAllowed)
+            {
+                return this.SetNoScript(item, when, sync);
+            }
+
+            var fullKey = GetKey(item.Key, item.Region);
+            var value = this.ToRedisValue(item.Value);
+
+            var flags = sync ? StackRedis.CommandFlags.None : StackRedis.CommandFlags.FireAndForget;
+
+            // ARGV [1]: value, [2]: type, [3]: expirationMode, [4]: expirationTimeout(millis), [5]: created(ticks)
+            var parameters = new StackRedis.RedisValue[]
+            {
+                value,
+                item.ValueType.AssemblyQualifiedName,
+                (int)item.ExpirationMode,
+                (long)item.ExpirationTimeout.TotalMilliseconds,
+                item.CreatedUtc.Ticks
+            };
+
+            StackRedis.RedisResult result;
+            if (when == StackRedis.When.NotExists)
+            {
+                result = this.Eval(ScriptType.Add, fullKey, parameters, flags);
+            }
+            else
+            {
+                result = this.Eval(ScriptType.Put, fullKey, parameters, flags);
+            }
+
+            if (result == null)
+            {
+                if (flags.HasFlag(StackRedis.CommandFlags.FireAndForget))
+                {
+                    if (!string.IsNullOrWhiteSpace(item.Region))
+                    {
+                        // setting region lookup key if region is being used
+                        this.connection.Database.HashSet(item.Region, fullKey, "regionKey", StackRedis.When.Always, StackRedis.CommandFlags.FireAndForget);
+                    }
+
+                    // put runs via fire and forget, so we don't get a result back
+                    return true;
+                }
+
+                // should never happen, something went wrong with the script
+                throw new InvalidOperationException("Something went wrong adding an item, result must not be null.");
+            }
+            else
+            {
+                if (result.IsNull && when == StackRedis.When.NotExists)
+                {
+                    // add failed because element exists already
+                    this.Logger.LogInfo("DB {0} | Failed to add item {1} because it exists.", this.connection.Database.Database, fullKey);
+                    return false;
+                }
+
+                var resultValue = (StackRedis.RedisValue)result;
+
+                if (resultValue.HasValue && resultValue.ToString().Equals("OK", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Added successfully:
+                    if (!string.IsNullOrWhiteSpace(item.Region))
+                    {
+                        // setting region lookup key if region is being used
+                        // we cannot do that within the lua because the region could be on another cluster node!
+                        this.connection.Database.HashSet(item.Region, fullKey, "regionKey", StackRedis.When.Always, StackRedis.CommandFlags.FireAndForget);
+                    }
+
+                    return true;
+                }
+
+                this.Logger.LogWarn("DB {0} | Failed to set item {1}: {2}.", this.connection.Database.Database, fullKey, resultValue.ToString());
+                return false;
+            }
+        }
+
+        private bool SetNoScript(CacheItem<TCacheValue> item, StackRedis.When when, bool sync = false)
+        {
             return this.Retry(() =>
             {
                 var fullKey = GetKey(item.Key, item.Region);
@@ -467,23 +639,23 @@ namespace CacheManager.Redis
                 {
                     new StackRedis.HashEntry(HashFieldType, item.ValueType.AssemblyQualifiedName),
                     new StackRedis.HashEntry(HashFieldExpirationMode, (int)item.ExpirationMode),
-                    new StackRedis.HashEntry(HashFieldExpirationTimeout, item.ExpirationTimeout.Ticks),
+                    new StackRedis.HashEntry(HashFieldExpirationTimeout, (long)item.ExpirationTimeout.TotalMilliseconds),
                     new StackRedis.HashEntry(HashFieldCreated, item.CreatedUtc.Ticks)
                 };
 
                 var flags = sync ? StackRedis.CommandFlags.None : StackRedis.CommandFlags.FireAndForget;
 
-                var setResult = this.Database.HashSet(fullKey, HashFieldValue, value, when, flags);
+                var setResult = this.connection.Database.HashSet(fullKey, HashFieldValue, value, when, flags);
 
                 // setResult from fire and forget is alwys false, so we have to assume it works...
                 setResult = flags == StackRedis.CommandFlags.FireAndForget ? true : setResult;
 
                 if (setResult)
                 {
-                    // update region lookup
                     if (!string.IsNullOrWhiteSpace(item.Region))
                     {
-                        this.Database.HashSet(item.Region, item.Key, "regionKey", when, StackRedis.CommandFlags.FireAndForget);
+                        // setting region lookup key if region is being used
+                        this.connection.Database.HashSet(item.Region, fullKey, "regionKey", StackRedis.When.Always, StackRedis.CommandFlags.FireAndForget);
                     }
 
                     // set the additional fields in case sliding expiration should be used in this
@@ -491,23 +663,82 @@ namespace CacheManager.Redis
                     // that we can extend the expiration period every time we do a get
                     if (metaValues != null)
                     {
-                        this.Database.HashSet(fullKey, metaValues, flags);
+                        this.connection.Database.HashSet(fullKey, metaValues, flags);
                     }
 
                     if (item.ExpirationMode != ExpirationMode.None)
                     {
-                        this.Database.KeyExpire(fullKey, item.ExpirationTimeout, StackRedis.CommandFlags.FireAndForget);
+                        this.connection.Database.KeyExpire(fullKey, item.ExpirationTimeout, StackRedis.CommandFlags.FireAndForget);
                     }
                     else
                     {
                         // bugfix #9
-                        this.Database.KeyExpire(fullKey, default(TimeSpan?), StackRedis.CommandFlags.FireAndForget);
+                        this.connection.Database.KeyExpire(fullKey, default(TimeSpan?), StackRedis.CommandFlags.FireAndForget);
                     }
                 }
 
                 return setResult;
             });
         }
-#pragma warning restore CSE0003
+
+        private StackRedis.RedisResult Eval(ScriptType scriptType, StackRedis.RedisKey redisKey, StackRedis.RedisValue[] values = null, StackRedis.CommandFlags flags = StackRedis.CommandFlags.None)
+        {
+            if (!this.scriptsLoaded)
+            {
+                lock (this.lockObject)
+                {
+                    if (!this.scriptsLoaded)
+                    {
+                        this.LoadScripts();
+                        this.scriptsLoaded = true;
+                    }
+                }
+            }
+
+            StackRedis.LoadedLuaScript script;
+            if (!this.shaScripts.TryGetValue(scriptType, out script))
+            {
+                this.Logger.LogCritical("Something is wrong with the Lua scripts. Seem to be not loaded.");
+                this.scriptsLoaded = false;
+                throw new InvalidOperationException("Something is wrong with the Lua scripts. Seem to be not loaded.");
+            }
+
+            try
+            {
+                return this.connection.Database.ScriptEvaluate(script.Hash, new[] { redisKey }, values, flags);
+            }
+            catch (StackRedis.RedisServerException ex) when (ex.Message.StartsWith("NOSCRIPT", StringComparison.OrdinalIgnoreCase))
+            {
+                this.Logger.LogInfo("Received NOSCRIPT from server. Reloading scripts...");
+                this.LoadScripts();
+
+                // retry
+                throw;
+            }
+        }
+
+        private void LoadScripts()
+        {
+            lock (this.lockObject)
+            {
+                this.Logger.LogInfo("Loading scripts.");
+
+                var putLua = StackRedis.LuaScript.Prepare(ScriptPut);
+                var addLua = StackRedis.LuaScript.Prepare(ScriptAdd);
+                var updateLua = StackRedis.LuaScript.Prepare(ScriptUpdate);
+                var getLua = StackRedis.LuaScript.Prepare(ScriptGet);
+
+                foreach (var server in this.Servers)
+                {
+                    if (server.IsConnected)
+                    {
+                        this.shaScripts[ScriptType.Put] = putLua.Load(server);
+                        this.shaScripts[ScriptType.Add] = addLua.Load(server);
+                        this.shaScripts[ScriptType.Update] = updateLua.Load(server);
+                        this.shaScripts[ScriptType.Get] = getLua.Load(server);
+                    }
+                }
+            }
+        }
     }
 }

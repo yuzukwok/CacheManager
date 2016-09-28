@@ -1,28 +1,33 @@
 ﻿{
-  "version": "0.7.1-*",
-  "description": "CacheManager is an open source abstraction layer for caching written in C#. It supports various cache providers and implements many advanced features. The Core library contains all base interfaces and tools. You should install at least one other CacheManager package to get cache handle implementations.",
+  "version": "0.9.1-*",
+  "description": "CacheManager is an open source caching abstraction layer for .NET written in C#. It supports various cache providers and implements many advanced features. The Core library contains all base interfaces and tools. You should install at least one other CacheManager package to get cache handle implementations.",
+  "packOptions": {
+    "licenseUrl": "https://github.com/MichaCo/CacheManager/blob/master/LICENSE",
+    "projectUrl": "http://www.cachemanager.net",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/MichaCo/CacheManager"
+    },
+    "summary": "CacheManager is an open source caching abstraction layer for .NET written in C#",
+    "tags": [ "Caching", "Cache", "CacheManager", "Distributed Cache", "StackExchange Redis", "Azure AppFabric", "Memcached" ]
+  },
   "authors": [ "MichaConrad" ],
-  "tags": [ "Caching", "Cache", "CacheManager", "Distributed Cache", "StackExchange Redis", "Azure AppFabric", "Memcached" ],
-  "copyright": "Copyright © 2015 MichaConrad",
-  "projectUrl": "http://www.cachemanager.net",
-  "licenseUrl": "https://github.com/MichaCo/CacheManager/blob/master/LICENSE",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/MichaCo/CacheManager"
-  },
-  "compilationOptions": {
-    "warningsAsErrors": true,
+  "buildOptions": {
+    "allowUnsafe": false,
     "languageVersion": "csharp6",
-    "allowUnsafe": false
+    "warningsAsErrors": true,
+    "xmlDoc": true,
+    "keyFile": "../../Tools/key.snk"
   },
+  "copyright": "Copyright (c) 2015 MichaConrad",
   "configurations": {
     "Debug": {
-      "compilationOptions": {
+      "buildOptions": {
         "define": [ "DEBUG" ]
       }
     },
     "Release": {
-      "compilationOptions": {
+      "buildOptions": {
         "define": [ "RELEASE" ],
         "optimize": true
       }
@@ -37,29 +42,22 @@
     "net45": {
       "frameworkAssemblies": {
         "System.Configuration": ""
-      },
-      "dependencies": {
       }
     },
-    "dnx451": {
-      "frameworkAssemblies": {
-        "System.Configuration": ""
-      }
-    },
-    "dotnet5.1": {
-      "compilationOptions": { "define": [ "DOTNET5_2" ] },
+    "netstandard1.1": {
+      "buildOptions": { "define": [ "NETSTANDARD" ] },
       "dependencies": {
-        "System.Collections": "4.0.10",
-        "System.Linq": "4.0.0",
-        "System.Diagnostics.Tools": "4.0.0",
-        "System.Globalization": "4.0.10",
-        "System.Threading": "4.0.10",
-        "System.Collections.Concurrent": "4.0.10",
-        "System.Text.Encoding": "4.0.10",
-        "System.Runtime.Extensions": "4.0.10",
-        "System.Runtime.InteropServices": "4.0.20",
-        "System.Reflection": "4.0.10",
-        "System.Reflection.TypeExtensions": "4.0.0"
+        "System.Collections": "4.0.11",
+        "System.Linq": "4.1.0",
+        "System.Diagnostics.Tools": "4.0.1",
+        "System.Diagnostics.Debug": "4.0.11",
+        "System.Globalization": "4.0.11",
+        "System.Threading": "4.0.11",
+        "System.Collections.Concurrent": "4.0.12",
+        "System.Text.Encoding": "4.0.11",
+        "System.Runtime.Extensions": "4.1.0",
+        "System.Runtime.InteropServices": "4.1.0",
+        "System.Reflection": "4.1.0"
       }
     }
   }

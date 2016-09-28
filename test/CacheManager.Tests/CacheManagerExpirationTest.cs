@@ -16,6 +16,25 @@ namespace CacheManager.Tests
 #endif
     public class CacheManagerExpirationTest : BaseCacheManagerTest
     {
+        // Issue #57 - Verifying diggits will be ignored and stored as proper milliseconds value (integer).
+        [Theory]
+        [MemberData("TestCacheManagers")]
+        public void CacheManager_Expire_DoesNotBreak_OnVeryPreciseValue<T>(T cache)
+            where T : ICacheManager<object>
+        {
+            using (cache)
+            {
+                var key = Guid.NewGuid().ToString();
+                var expiration = TimeSpan.FromTicks(315311111111111);
+                Action act = () => cache.Add(new CacheItem<object>(key, "value", ExpirationMode.Sliding, expiration));
+
+                act.ShouldNotThrow();
+                var item = cache.GetCacheItem(key);
+                item.Should().NotBeNull();
+                Math.Ceiling(item.ExpirationTimeout.TotalDays).Should().Be(Math.Ceiling(expiration.TotalDays));
+            }
+        }
+
         // Issue #9 - item still expires
         [Theory]
         [MemberData("TestCacheManagers")]
@@ -40,6 +59,84 @@ namespace CacheManager.Tests
             }
         }
 
+        [Trait("category", "Unreliable")]
+        [Theory]
+        [MemberData("TestCacheManagers")]
+        public void CacheManager_Sliding_DoesNotExpire_OnGet<T>(T cache)
+            where T : ICacheManager<object>
+        {
+            using (cache)
+            {
+#if !NET40 && MOCK_HTTPCONTEXT_ENABLED
+                var first = cache.CacheHandles.First();
+                if (cache.CacheHandles.Count() == 1 && first.GetType() == typeof(SystemWebCacheHandleWrapper<object>))
+                {
+                    // system.web caching doesn't support short sliding expiration. must be higher than 2000ms for some strange reason...
+                    return;
+                }
+#endif
+                var start = Environment.TickCount;
+                var key = Guid.NewGuid().ToString();
+                cache.Add(new CacheItem<object>(key, "value", ExpirationMode.Sliding, TimeSpan.FromMilliseconds(100)))
+                    .Should().BeTrue();
+
+                cache.GetCacheItem(key).Should().NotBeNull("After: " + (Environment.TickCount - start) + ": " + cache.ToString());
+
+                start = Environment.TickCount;
+                Thread.Sleep(50);
+                cache[key].Should().NotBeNull("After: " + (Environment.TickCount - start) + ": " + cache.ToString());
+
+                start = Environment.TickCount;
+                Thread.Sleep(50);
+                cache.Get(key).Should().NotBeNull("After: " + (Environment.TickCount - start) + ": " + cache.ToString());
+
+                start = Environment.TickCount;
+                Thread.Sleep(110);
+                cache.GetCacheItem(key).Should().BeNull("After: " + (Environment.TickCount - start) + ": " + cache.ToString());
+            }
+        }
+
+        [Trait("category", "Unreliable")]
+        [Theory]
+        [MemberData("TestCacheManagers")]
+        public void CacheManager_Sliding_DoesNotExpire_OnUpdate<T>(T cache)
+            where T : ICacheManager<object>
+        {
+            // see #50, update doesn't copy custom expire settings per item
+            using (cache)
+            {
+#if !NET40 && MOCK_HTTPCONTEXT_ENABLED
+                var first = cache.CacheHandles.First();
+                if (cache.CacheHandles.Count() == 1 && first.GetType() == typeof(SystemWebCacheHandleWrapper<object>))
+                {
+                    // system.web caching doesn't support short sliding expiration. must be higher than 2000ms for some strange reason...
+                    return;
+                }
+#endif
+                var start = Environment.TickCount;
+                var key = Guid.NewGuid().ToString();
+                cache.Add(new CacheItem<object>(key, "value", ExpirationMode.Sliding, TimeSpan.FromMilliseconds(100)))
+                    .Should().BeTrue();
+
+                cache.AddOrUpdate(key, "value", o => o).Should().NotBeNull("After: " + (Environment.TickCount - start) + ": " + cache.ToString());
+
+                start = Environment.TickCount;
+                Thread.Sleep(50);
+                object val;
+                cache.TryUpdate(key, o => o, out val);
+                val.Should().NotBeNull("After: " + (Environment.TickCount - start) + ": " + cache.ToString());
+
+                start = Environment.TickCount;
+                Thread.Sleep(50);
+                cache.Update(key, o => o).Should().NotBeNull("After: " + (Environment.TickCount - start) + ": " + cache.ToString());
+
+                start = Environment.TickCount;
+                Thread.Sleep(110);
+                cache.TryUpdate(key, o => o, out val);
+                val.Should().BeNull("After: " + (Environment.TickCount - start) + ": " + cache.ToString());
+            }
+        }
+
         [Theory]
         [MemberData("TestCacheManagers")]
         public void CacheManager_Expire_Absolute_ForKey_Validate<T>(T cache)
@@ -55,7 +152,7 @@ namespace CacheManager.Tests
 
                 var item = cache.GetCacheItem(key);
 
-                item.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10));
+                item.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10), precision: 200);
                 item.ExpirationMode.Should().Be(ExpirationMode.Absolute);
             }
         }
@@ -76,7 +173,7 @@ namespace CacheManager.Tests
 
                 var item = cache.GetCacheItem(key, region);
 
-                item.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10));
+                item.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10), precision: 200);
                 item.ExpirationMode.Should().Be(ExpirationMode.Absolute);
             }
         }
@@ -96,7 +193,7 @@ namespace CacheManager.Tests
 
                 var item = cache.GetCacheItem(key);
 
-                item.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10));
+                item.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10), precision: 200);
                 item.ExpirationMode.Should().Be(ExpirationMode.Sliding);
             }
         }
@@ -117,7 +214,7 @@ namespace CacheManager.Tests
 
                 var item = cache.GetCacheItem(key, region);
 
-                item.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10));
+                item.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10), precision: 200);
                 item.ExpirationMode.Should().Be(ExpirationMode.Sliding);
             }
         }
@@ -163,6 +260,7 @@ namespace CacheManager.Tests
             }
         }
 
+#if !DNXCORE50
         [Fact]
         [Trait("category", "Unreliable")]
         [ReplaceCulture]
@@ -186,6 +284,59 @@ namespace CacheManager.Tests
                 cache.Get(key).Should().BeNull("Should be expired.");
             }
         }
+#endif
+
+        [Fact]
+        [Trait("category", "Unreliable")]
+        [ReplaceCulture]
+        public void DictionaryHandle_AbsoluteExpires()
+        {
+            using (var cache = CacheFactory.Build(settings =>
+            {
+                settings.WithDictionaryHandle()
+                        .WithExpiration(ExpirationMode.Absolute, TimeSpan.FromMilliseconds(50));
+            }))
+            {
+                var key = Guid.NewGuid().ToString();
+                cache.Put(key, "value");
+
+                Thread.Sleep(20);
+
+                cache.Get(key).Should().Be("value");
+
+                Thread.Sleep(40);
+
+                cache.Get(key).Should().BeNull("Should be expired.");
+            }
+        }
+
+        [Fact]
+        [Trait("category", "Unreliable")]
+        [ReplaceCulture]
+        public void DictionaryHandle_SlidingExpires()
+        {
+            using (var cache = CacheFactory.Build(settings =>
+            {
+                settings.WithDictionaryHandle()
+                        .WithExpiration(ExpirationMode.Sliding, TimeSpan.FromMilliseconds(50));
+            }))
+            {
+                var key = Guid.NewGuid().ToString();
+                cache.Put(key, "value");
+
+                Thread.Sleep(30);
+
+                cache.Get(key).Should().Be("value");
+
+                Thread.Sleep(30);
+
+                cache.Get(key).Should().Be("value");
+
+                Thread.Sleep(50);
+
+                cache.Get(key).Should().BeNull("Should be expired.");
+            }
+        }
 
         [Fact]
         public void CacheItem_WithExpiration()
@@ -197,9 +348,9 @@ namespace CacheManager.Tests
             var none = item.WithExpiration(ExpirationMode.None, default(TimeSpan));
 
             absolute.ExpirationMode.Should().Be(ExpirationMode.Absolute);
-            absolute.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10));
+            absolute.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10), precision: 200);
             sliding.ExpirationMode.Should().Be(ExpirationMode.Sliding);
-            sliding.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10));
+            sliding.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10), precision: 200);
             none.ExpirationMode.Should().Be(ExpirationMode.None);
             none.ExpirationTimeout.Should().BeCloseTo(default(TimeSpan));
         }
@@ -212,7 +363,7 @@ namespace CacheManager.Tests
             var absolute = item.WithAbsoluteExpiration(DateTimeOffset.Now.AddMinutes(10));
 
             absolute.ExpirationMode.Should().Be(ExpirationMode.Absolute);
-            absolute.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10));
+            absolute.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10), precision: 200);
         }
 
         [Fact]
@@ -223,7 +374,7 @@ namespace CacheManager.Tests
             var absolute = item.WithSlidingExpiration(TimeSpan.FromMinutes(10));
 
             absolute.ExpirationMode.Should().Be(ExpirationMode.Sliding);
-            absolute.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10));
+            absolute.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10), precision: 200);
         }
 
         [Fact]
@@ -237,6 +388,7 @@ namespace CacheManager.Tests
             absolute.ExpirationTimeout.Should().BeCloseTo(default(TimeSpan));
         }
 
+#if !DNXCORE50
         [Fact]
         public void BaseCacheHandle_ExpirationInherits_Issue_1()
         {
@@ -258,5 +410,6 @@ namespace CacheManager.Tests
                 handles[1].GetCacheItem("something").ExpirationTimeout.Should().Be(default(TimeSpan));
             }
         }
+#endif
     }
 }

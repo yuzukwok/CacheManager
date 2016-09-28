@@ -1,35 +1,36 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.IO;
 using System.Threading;
-using System.Web;
 using CacheManager.Core;
 
-#if !NET40
+#if !NET40 && !DNXCORE50
+
 using Couchbase.Configuration.Client;
-#endif
-#if DNX451
+
 #endif
 
 using static CacheManager.Core.Utility.Guard;
 
 namespace CacheManager.Tests
 {
+    public enum Serializer
+    {
+        Binary,
+        Json,
+        GzJson,
+        Proto
+    }
+
     [ExcludeFromCodeCoverage]
     public static class TestManagers
     {
+        ////private const string RedisHost = "ubuntu-local";
+        ////private const int RedisPort = 7024; // redis 2.4
+        private const string RedisHost = "127.0.0.1";
+        private const int RedisPort = 6379;
         private const int StartDbCount = 100;
         private static int databaseCount = StartDbCount;
-
-        public static ICacheManager<object> WithOneMemoryCacheHandleSliding
-            => CacheFactory.Build(
-                settings => settings
-                    .WithUpdateMode(CacheUpdateMode.Up)
-                    .WithSystemRuntimeCacheHandle()
-                        .EnableStatistics()
-                        .EnablePerformanceCounters()
-                    .WithExpiration(ExpirationMode.Sliding, TimeSpan.FromSeconds(1000)));
 
         public static ICacheManager<object> WithOneDicCacheHandle
             => CacheFactory.Build(
@@ -39,29 +40,9 @@ namespace CacheManager.Tests
                         .EnableStatistics()
                     .WithExpiration(ExpirationMode.Sliding, TimeSpan.FromSeconds(1000)));
 
-        public static ICacheManager<object> WithOneMemoryCacheHandle
-            => CacheFactory.Build(settings => settings.WithSystemRuntimeCacheHandle().EnableStatistics());
-
-        public static ICacheManager<object> WithMemoryAndDictionaryHandles
-            => CacheFactory.Build(
-                settings =>
-                {
-                    settings
-                        .WithUpdateMode(CacheUpdateMode.None)
-                        .WithSystemRuntimeCacheHandle()
-                            .EnableStatistics()
-                        .And.WithSystemRuntimeCacheHandle()
-                            .EnableStatistics()
-                            .WithExpiration(ExpirationMode.Absolute, TimeSpan.FromSeconds(1000))
-                        .And.WithDictionaryHandle()
-                            .EnableStatistics()
-                        .And.WithDictionaryHandle()
-                            .EnableStatistics()
-                            .WithExpiration(ExpirationMode.Absolute, TimeSpan.FromSeconds(1000));
-                });
-
         public static ICacheManager<object> WithManyDictionaryHandles
             => CacheFactory.Build(
+                "manyDicts",
                 settings =>
                 {
                     settings
@@ -88,29 +69,6 @@ namespace CacheManager.Tests
                             .WithExpiration(ExpirationMode.Absolute, TimeSpan.FromSeconds(1000));
                 });
 
-        public static ICacheManager<object> WithTwoNamedMemoryCaches
-            => CacheFactory.Build(
-                settings =>
-                {
-                    settings
-                        .WithUpdateMode(CacheUpdateMode.Full)
-                        .WithSystemRuntimeCacheHandle("cacheHandleA")
-                            .EnableStatistics()
-                        .And.WithSystemRuntimeCacheHandle("cacheHandleB")
-                            .EnableStatistics();
-                });
-
-#if !NET40 && MOCK_HTTPCONTEXT_ENABLED
-        public static ICacheManager<object> WithSystemWebCache
-            => CacheFactory.Build(
-                settings =>
-                {
-                    settings
-                    .WithHandle(typeof(SystemWebCacheHandleWrapper<>))
-                        .EnableStatistics();
-                });
-#endif
-
         public static ICacheManager<object> WithRedisCache
         {
             get
@@ -135,9 +93,58 @@ namespace CacheManager.Tests
                     databaseCount = StartDbCount;
                 }
 
-                return CreateRedisAndSystemCacheWithBackPlate(databaseCount, false);
+                return CreateRedisAndDicCacheWithBackplane(databaseCount, false, Guid.NewGuid().ToString());
             }
         }
+
+#if !MSBUILD
+        public static ICacheManager<object> WithOneMicrosoftMemoryCacheHandle
+          => CacheFactory.Build(settings => settings.WithMicrosoftMemoryCacheHandle().EnableStatistics());
+#endif
+
+#if !DNXCORE50
+
+        public static ICacheManager<object> WithOneMemoryCacheHandleSliding
+            => CacheFactory.Build(
+                settings => settings
+                    .WithUpdateMode(CacheUpdateMode.Up)
+                    .WithSystemRuntimeCacheHandle()
+                        .EnableStatistics()
+                        .EnablePerformanceCounters()
+                    .WithExpiration(ExpirationMode.Sliding, TimeSpan.FromSeconds(1000)));
+
+        public static ICacheManager<object> WithOneMemoryCacheHandle
+            => CacheFactory.Build(settings => settings.WithSystemRuntimeCacheHandle().EnableStatistics());
+
+        public static ICacheManager<object> WithMemoryAndDictionaryHandles
+            => CacheFactory.Build(
+                settings =>
+                {
+                    settings
+                        .WithUpdateMode(CacheUpdateMode.None)
+                        .WithSystemRuntimeCacheHandle()
+                            .EnableStatistics()
+                        .And.WithSystemRuntimeCacheHandle()
+                            .EnableStatistics()
+                            .WithExpiration(ExpirationMode.Absolute, TimeSpan.FromSeconds(1000))
+                        .And.WithDictionaryHandle()
+                            .EnableStatistics()
+                        .And.WithDictionaryHandle()
+                            .EnableStatistics()
+                            .WithExpiration(ExpirationMode.Absolute, TimeSpan.FromSeconds(1000));
+                });
+
+        public static ICacheManager<object> WithTwoNamedMemoryCaches
+            => CacheFactory.Build(
+                settings =>
+                {
+                    settings
+                        .WithUpdateMode(CacheUpdateMode.Full)
+                        .WithSystemRuntimeCacheHandle("cacheHandleA")
+                            .EnableStatistics()
+                        .And.WithSystemRuntimeCacheHandle("cacheHandleB")
+                            .EnableStatistics();
+                });
 
         public static ICacheManager<object> WithMemcached
         {
@@ -155,7 +162,21 @@ namespace CacheManager.Tests
             }
         }
 
-#if !NET40
+#endif
+#if !NET40 && MOCK_HTTPCONTEXT_ENABLED && !DNXCORE50
+
+        public static ICacheManager<object> WithSystemWebCache
+            => CacheFactory.Build(
+                settings =>
+                {
+                    settings
+                    .WithHandle(typeof(SystemWebCacheHandleWrapper<>))
+                        .EnableStatistics();
+                });
+
+#endif
+
+#if !NET40 && !DNXCORE50
 
         public static ICacheManager<object> WithCouchbaseMemcached
         {
@@ -200,45 +221,57 @@ namespace CacheManager.Tests
 
 #endif
 
-        public static ICacheManager<object> CreateRedisAndSystemCacheWithBackPlate(int database = 0, bool sharedRedisConfig = true)
+        public static ICacheManager<object> CreateRedisAndDicCacheWithBackplane(int database = 0, bool sharedRedisConfig = true, string channelName = null, Serializer serializer = Serializer.Proto)
         {
             var redisKey = sharedRedisConfig ? "redisConfig" : Guid.NewGuid().ToString();
             return CacheFactory.Build(settings =>
             {
                 settings
                     .WithUpdateMode(CacheUpdateMode.Up)
-                    .WithSystemRuntimeCacheHandle()
+                    .WithDictionaryHandle()
                         .EnableStatistics();
                 settings
+                    .TestSerializer(serializer)
                     .WithMaxRetries(100)
                     .WithRetryTimeout(1000)
                     .WithRedisConfiguration(redisKey, config =>
                     {
                         config
                             .WithDatabase(database)
-                            .WithEndpoint("127.0.0.1", 6379);
+                            .WithEndpoint(RedisHost, RedisPort);
                     })
-                    .WithRedisBackPlate(redisKey)
                     .WithRedisCacheHandle(redisKey, true)
                     .EnableStatistics();
+
+                ////settings.WithMicrosoftLogging(lf => lf.AddDebug(LogLevel.Information));
+
+                if (channelName != null)
+                {
+                    settings.WithRedisBackplane(redisKey, channelName);
+                }
+                else
+                {
+                    settings.WithRedisBackplane(redisKey);
+                }
             });
         }
 
-        public static ICacheManager<object> CreateRedisCache(int database = 0, bool sharedRedisConfig = true)
+        public static ICacheManager<object> CreateRedisCache(int database = 0, bool sharedRedisConfig = true, Serializer serializer = Serializer.GzJson)
         {
             var redisKey = sharedRedisConfig ? "redisConfig" : Guid.NewGuid().ToString();
             var cache = CacheFactory.Build(settings =>
             {
                 settings
+                    .TestSerializer(serializer)
                     .WithMaxRetries(100)
                     .WithRetryTimeout(1000)
                     .WithRedisConfiguration(redisKey, config =>
                     {
                         config
                             .WithDatabase(database)
-                            .WithEndpoint("127.0.0.1", 6379);
+                            .WithEndpoint(RedisHost, RedisPort);
                     })
-                    .WithRedisBackPlate(redisKey)
+                    ////.WithRedisBackplane(redisKey)
                     .WithRedisCacheHandle(redisKey, true)
                     .EnableStatistics();
             });
@@ -246,21 +279,22 @@ namespace CacheManager.Tests
             return cache;
         }
 
-        public static ICacheManager<T> CreateRedisCache<T>(int database = 0, bool sharedRedisConfig = true)
+        public static ICacheManager<T> CreateRedisCache<T>(int database = 0, bool sharedRedisConfig = true, Serializer serializer = Serializer.GzJson)
         {
             var redisKey = sharedRedisConfig ? "redisConfig" : Guid.NewGuid().ToString();
             var cache = CacheFactory.Build<T>(settings =>
             {
                 settings
+                    .TestSerializer(serializer)
                     .WithMaxRetries(100)
                     .WithRetryTimeout(1000)
                     .WithRedisConfiguration(redisKey, config =>
                     {
                         config
                             .WithDatabase(database)
-                            .WithEndpoint("127.0.0.1", 6379);
+                            .WithEndpoint(RedisHost, RedisPort);
                     })
-                    .WithRedisBackPlate(redisKey)
+                    .WithRedisBackplane(redisKey)
                     .WithRedisCacheHandle(redisKey, true)
                     .EnableStatistics();
             });
@@ -279,12 +313,17 @@ namespace CacheManager.Tests
         {
             get
             {
+#if !DNXCORE50
                 yield return new object[] { TestManagers.WithOneMemoryCacheHandleSliding };
-                yield return new object[] { TestManagers.WithOneDicCacheHandle };
                 yield return new object[] { TestManagers.WithOneMemoryCacheHandle };
                 yield return new object[] { TestManagers.WithMemoryAndDictionaryHandles };
-                yield return new object[] { TestManagers.WithManyDictionaryHandles };
                 yield return new object[] { TestManagers.WithTwoNamedMemoryCaches };
+#endif
+#if !MSBUILD
+                yield return new object[] { TestManagers.WithOneMicrosoftMemoryCacheHandle };
+#endif
+                yield return new object[] { TestManagers.WithManyDictionaryHandles };
+                yield return new object[] { TestManagers.WithOneDicCacheHandle };
 #if REDISENABLED
                 yield return new object[] { TestManagers.WithRedisCache };
                 yield return new object[] { TestManagers.WithSystemAndRedisCache };
@@ -297,19 +336,48 @@ namespace CacheManager.Tests
             }
         }
 
+#if !DNXCORE50
+
         public static string GetCfgFileName(string fileName)
         {
             NotNullOrWhiteSpace(fileName, nameof(fileName));
-#if DNX451
-            // var appEnv = CallContextServiceLocator.Locator.ServiceProvider
-            //    .GetService(typeof(IApplicationEnvironment)) as IApplicationEnvironment;
-            // var basePath = appEnv.ApplicationBasePath;
             var basePath = Environment.CurrentDirectory;
-#else
-            var basePath = AppDomain.CurrentDomain.BaseDirectory;
-#endif
-
             return basePath + (fileName.StartsWith("/") ? fileName : "/" + fileName);
+        }
+
+#endif
+    }
+
+    internal static class ConfigurationExtension
+    {
+        public static ConfigurationBuilderCachePart TestSerializer(this ConfigurationBuilderCachePart part, Serializer serializer)
+        {
+            switch (serializer)
+            {
+                case Serializer.Binary:
+                    break;
+                case Serializer.GzJson:
+                    part.WithGzJsonSerializer();
+                    break;
+                case Serializer.Json:
+                    part.WithJsonSerializer();
+                    break;
+                case Serializer.Proto:
+                    part.WithProtoBufSerializer();
+                    break;
+            }
+            return part;
         }
     }
 }
+
+#if DNXCORE50
+namespace System.Diagnostics.CodeAnalysis
+{
+    [Conditional("DEBUG")]
+    [AttributeUsage(AttributeTargets.All, Inherited = false, AllowMultiple = false)]
+    internal sealed class ExcludeFromCodeCoverageAttribute : Attribute
+    {
+    }
+}
+#endif

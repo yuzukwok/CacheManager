@@ -1,4 +1,4 @@
-﻿using System;
+﻿#if !NETSTANDARD
 using System.Collections.Generic;
 using System.Configuration;
 
@@ -12,7 +12,7 @@ namespace CacheManager.Redis
     ///   <connections>
     ///    <connection id="redis1"
     ///                    database="0"
-    ///                    { connnectionString="redis0:6379,redis1:6380,keepAlive=180,allowAdmin=true" }
+    ///                    { connectionString="redis0:6379,redis1:6380,keepAlive=180,allowAdmin=true" }
     ///                    OR
     ///                    {
     ///                    allowAdmin="true|false"
@@ -349,3 +349,4 @@ namespace CacheManager.Redis
         }
     }
 }
+#endif

@@ -36,6 +36,7 @@
     <DocumentationFile>bin\Release\CacheManager.Core.XML</DocumentationFile>
     <CodeAnalysisRuleSet>..\..\common\CacheManager.ruleset</CodeAnalysisRuleSet>
     <RunCodeAnalysis>true</RunCodeAnalysis>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <PropertyGroup>
     <SignAssembly>false</SignAssembly>
@@ -89,8 +90,11 @@
     <Compile Include="..\CacheManager.Core\ICacheManager.cs">
       <Link>ICacheManager.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.Core\Internal\BackPlateMessage.cs">
-      <Link>Internal\BackPlateMessage.cs</Link>
+    <Compile Include="..\CacheManager.Core\ICacheManagerConfiguration.cs">
+      <Link>ICacheManagerConfiguration.cs</Link>
+    </Compile>
+    <Compile Include="..\CacheManager.Core\Internal\BackplaneMessage.cs">
+      <Link>Internal\BackplaneMessage.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.Core\Internal\BaseCache.cs">
       <Link>Internal\BaseCache.cs</Link>
@@ -101,8 +105,8 @@
     <Compile Include="..\CacheManager.Core\Internal\BinaryCacheSerializer.cs">
       <Link>Internal\BinaryCacheSerializer.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.Core\Internal\CacheBackPlate.cs">
-      <Link>Internal\CacheBackPlate.cs</Link>
+    <Compile Include="..\CacheManager.Core\Internal\CacheBackplane.cs">
+      <Link>Internal\CacheBackplane.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.Core\Internal\CacheEventArgs.cs">
       <Link>Internal\CacheEventArgs.cs</Link>
@@ -125,14 +129,23 @@
     <Compile Include="..\CacheManager.Core\Internal\CacheStatsCounterType.cs">
       <Link>Internal\CacheStatsCounterType.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.Core\Internal\DictionaryCacheHandle`1.cs">
-      <Link>Internal\DictionaryCacheHandle`1.cs</Link>
+    <Compile Include="..\CacheManager.Core\Internal\DictionaryCacheHandle.cs">
+      <Link>Internal\DictionaryCacheHandle.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.Core\Internal\ICacheValueSerializer.cs">
       <Link>Internal\ICacheValueSerializer.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.Core\UpdateItemConfig.cs">
-      <Link>UpdateItemConfig.cs</Link>
+    <Compile Include="..\CacheManager.Core\Logging\ILogger.cs">
+      <Link>Logging\ILogger.cs</Link>
+    </Compile>
+    <Compile Include="..\CacheManager.Core\Logging\ILoggerFactory.cs">
+      <Link>Logging\ILoggerFactory.cs</Link>
+    </Compile>
+    <Compile Include="..\CacheManager.Core\Logging\LoggerExtensions.cs">
+      <Link>Logging\LoggerExtensions.cs</Link>
+    </Compile>
+    <Compile Include="..\CacheManager.Core\Logging\LogLevel.cs">
+      <Link>Logging\LogLevel.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.Core\UpdateItemResult.cs">
       <Link>UpdateItemResult.cs</Link>
@@ -143,12 +156,19 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
+    <None Include="packages.config">
+      <SubType>Designer</SubType>
+    </None>
   </ItemGroup>
   <ItemGroup>
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\Newtonsoft.Json.dll" />
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\StyleCop.Analyzers.CodeFixes.dll" />
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\StyleCop.Analyzers.dll" />
+    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0\analyzers\dotnet\cs\Newtonsoft.Json.dll" />
+    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0\analyzers\dotnet\cs\StyleCop.Analyzers.CodeFixes.dll" />
+    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0\analyzers\dotnet\cs\StyleCop.Analyzers.dll" />
+  </ItemGroup>
+  <ItemGroup>
+    <CodeAnalysisDictionary Include="..\..\common\CustomDictionary.xml">
+      <Link>CustomDictionary.xml</Link>
+    </CodeAnalysisDictionary>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

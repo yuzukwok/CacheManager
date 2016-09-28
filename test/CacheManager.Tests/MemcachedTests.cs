@@ -1,8 +1,8 @@
-﻿using System;
+﻿#if !DNXCORE50
+using System;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using CacheManager.Core;
 using FluentAssertions;
@@ -30,8 +30,7 @@ namespace CacheManager.Tests
             });
 
             // assert
-            act.ShouldThrow<TargetInvocationException>()
-                .WithInnerException<InvalidOperationException>()
+            act.ShouldThrow<InvalidOperationException>()
                 .WithInnerMessage("The cache value type must be serializable*");
         }
 
@@ -175,7 +174,7 @@ namespace CacheManager.Tests
             using (var cache = CacheFactory.Build<RaceConditionTestElement>(settings =>
             {
                 settings.WithUpdateMode(CacheUpdateMode.Full)
-                    .WithSystemRuntimeDefaultCacheHandle()
+                    .WithSystemRuntimeCacheHandle()
                         .WithExpiration(ExpirationMode.Absolute, TimeSpan.FromMilliseconds(1))
                     .And
                     .WithMemcachedCacheHandle("default")
@@ -203,7 +202,7 @@ namespace CacheManager.Tests
                                     Interlocked.Increment(ref countCasModifyCalls);
                                     return value;
                                 },
-                                new UpdateItemConfig(50, VersionConflictHandling.EvictItemFromOtherCaches));
+                                50);
                         }
                     },
                     numThreads,
@@ -304,7 +303,7 @@ namespace CacheManager.Tests
                                     Interlocked.Increment(ref countCasModifyCalls);
                                     return value;
                                 },
-                                new UpdateItemConfig(retries, VersionConflictHandling.EvictItemFromOtherCaches));
+                                retries);
                         }
                     },
                     numThreads,
@@ -346,20 +345,5 @@ namespace CacheManager.Tests
             }
         }
     }
-
-    [Serializable]
-    [ExcludeFromCodeCoverage]
-    public class RaceConditionTestElement
-    {
-        public RaceConditionTestElement()
-        {
-        }
-
-        public long Counter { get; set; }
-    }
-
-    [ExcludeFromCodeCoverage]
-    public class IAmNotSerializable
-    {
-    }
 }
+#endif

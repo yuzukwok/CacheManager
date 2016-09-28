@@ -1,37 +1,44 @@
 {
-  "version": "0.7.1-*",
-  "description": "CacheManager is an open source abstraction layer for caching written in C#. It supports various cache providers and implements many advanced features.",
+  "version": "0.9.1-*",
+  "description": "CacheManager is an open source caching abstraction layer for .NET written in C#. It supports various cache providers and implements many advanced features.",
   "authors": [ "MichaConrad" ],
-  "tags": [ "Caching", "Cache", "CacheManager", "Distributed Cache", "StackExchange Redis", "Azure AppFabric", "Memcached" ],
-  "projectUrl": "http://www.cachemanager.net",
-  "licenseUrl": "https://github.com/MichaCo/CacheManager/blob/master/LICENSE",
   "dependencies": {
-    "CacheManager.Core": "",
-    "CacheManager.Serialization.Json": "",
-    "Microsoft.Dnx.Runtime.Abstractions": "1.0.0-*"
+    "CacheManager.Microsoft.Extensions.Logging": { "target": "project" },
+    "CacheManager.Microsoft.Extensions.Configuration": { "target": "project" },
+    "CacheManager.Core": { "target": "project" },
+    "CacheManager.Serialization.Json": { "target": "project" },
+    "CacheManager.StackExchange.Redis": { "target": "project" },
+    "Microsoft.Extensions.Logging.Console": "1.0.0",
+    "Microsoft.Extensions.Logging.Debug": "1.0.0",
+    "Microsoft.Extensions.Configuration.Json": "1.0.0",
+    "Microsoft.Extensions.Configuration.Binder": "1.0.0"
   },
-  "commands": {
-    "run": "CacheManager.Config.Tests"
+  "buildOptions": {
+    "emitEntryPoint": true,
+    "copyToOutput": [
+      "cache.json"
+    ]
   },
-  "exclude": "Properties/AssemblyInfo.cs",
   "frameworks": {
-    "dnx451": {
+    "net451": {
       "frameworkAssemblies": {
         "System.Configuration": ""
       },
       "dependencies": {
-        "CacheManager.SystemRuntimeCaching": "",
-        "CacheManager.StackExchange.Redis": ""
+        "CacheManager.SystemRuntimeCaching": { "target": "project" }
       }
     },
-    "dnxcore50": {
+    "netcoreapp1.0": {
+      "buildOptions": { "define": [ "NETCORE" ] },
       "dependencies": {
-        "System.Threading": "4.0.10",
-        "System.Threading.Thread": "4.0.0-*",
-        "System.Threading.Tasks": "4.0.10-*",
-        "System.Threading.Tasks.Parallel": "4.0.0-*",
-        "System.Console": "4.0.0-*",
-        "System.Globalization": "4.0.10-*"
+        "Microsoft.NETCore.App": {
+          "version": "1.0.0",
+          "type": "platform"
+        },
+        "System.Threading.Thread": "4.0.0",
+        "System.Threading.Tasks.Parallel": "4.0.1",
+        "System.Console": "4.0.0",
+        "System.Runtime": "4.1.0"
       }
     }
   }

@@ -1,13 +1,16 @@
 ﻿using System;
-using System.Linq;
 using System.Threading.Tasks;
+using CacheManager.Core.Logging;
 using StackRedis = StackExchange.Redis;
 
 namespace CacheManager.Redis
 {
     internal static class RetryHelper
     {
-        public static T Retry<T>(Func<T> retryme, int timeOut, int retries)
+        private const string ErrorMessage = "Maximum number of tries exceeded to perform the action: {0}.";
+        private const string WarningMessage = "Exception occurred performing an action. Retrying... {0}/{1}";
+
+        public static T Retry<T>(Func<T> retryme, int timeOut, int retries, ILogger logger)
         {
             var tries = 0;
             do
@@ -18,24 +21,48 @@ namespace CacheManager.Redis
                 {
                     return retryme();
                 }
-                catch (StackRedis.RedisConnectionException)
+
+                // might occur on lua script execution on a readonly slave because the master just died.
+                // Should recover via fail over
+                catch (StackRedis.RedisServerException ex)
                 {
                     if (tries >= retries)
                     {
+                        logger.LogError(ex, ErrorMessage, retries);
                         throw;
                     }
+
+                    logger.LogWarn(ex, WarningMessage, tries, retries);
 #if NET40
                     TaskEx.Delay(timeOut).Wait();
 #else
                     Task.Delay(timeOut).Wait();
 #endif
                 }
-                catch (TimeoutException)
+                catch (StackRedis.RedisConnectionException ex)
                 {
                     if (tries >= retries)
                     {
+                        logger.LogError(ex, ErrorMessage, retries);
                         throw;
                     }
+
+                    logger.LogWarn(ex, WarningMessage, tries, retries);
+#if NET40
+                    TaskEx.Delay(timeOut).Wait();
+#else
+                    Task.Delay(timeOut).Wait();
+#endif
+                }
+                catch (TimeoutException ex)
+                {
+                    if (tries >= retries)
+                    {
+                        logger.LogError(ex, ErrorMessage, retries);
+                        throw;
+                    }
+
+                    logger.LogWarn(ex, WarningMessage, tries, retries);
 #if NET40
                     TaskEx.Delay(timeOut).Wait();
 #else
@@ -46,24 +73,15 @@ namespace CacheManager.Redis
                 {
                     if (tries >= retries)
                     {
+                        logger.LogError(aggregateException, ErrorMessage, retries);
                         throw;
                     }
 
                     aggregateException.Handle(e =>
                     {
-                        ////var connectionException = e as StackRedis.RedisConnectionException;
-                        ////if (connectionException != null)
-                        ////{
-                        ////    if (connectionException.FailureType == StackRedis.ConnectionFailureType.UnableToConnect
-                        ////        || connectionException.FailureType == StackRedis.ConnectionFailureType.AuthenticationFailure
-                        ////        || connectionException.FailureType == StackRedis.ConnectionFailureType.UnableToResolvePhysicalConnection)
-                        ////    {
-                        ////        throw connectionException;
-                        ////    }
-                        ////}
-
-                        if (e is StackRedis.RedisConnectionException || e is System.TimeoutException)
+                        if (e is StackRedis.RedisConnectionException || e is System.TimeoutException || e is StackRedis.RedisServerException)
                         {
+                            logger.LogWarn(e, WarningMessage, tries, retries);
 #if NET40
                             TaskEx.Delay(timeOut).Wait();
 #else
@@ -73,6 +91,7 @@ namespace CacheManager.Redis
                             return true;
                         }
 
+                        logger.LogCritical("Unhandled exception occurred.", aggregateException);
                         return false;
                     });
                 }
@@ -82,7 +101,7 @@ namespace CacheManager.Redis
             return default(T);
         }
 
-        public static void Retry(Action retryme, int timeOut, int retries)
+        public static void Retry(Action retryme, int timeOut, int retries, ILogger logger)
         {
             Retry(
                 () =>
@@ -91,7 +110,8 @@ namespace CacheManager.Redis
                     return true;
                 },
                 timeOut,
-                retries);
+                retries,
+                logger);
         }
     }
 }

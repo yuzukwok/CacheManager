@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+#if !NETSTANDARD
 using System.Configuration;
-using System.Globalization;
+#endif
 using System.IO;
 using static CacheManager.Core.Utility.Guard;
 
@@ -31,11 +32,13 @@ namespace CacheManager.Redis
                         {
                             config = new Dictionary<string, RedisConfiguration>();
 
+#if !NETSTANDARD
                             var section = ConfigurationManager.GetSection(RedisConfigurationSection.DefaultSectionName) as RedisConfigurationSection;
                             if (section != null)
                             {
                                 LoadConfiguration(section);
                             }
+#endif
                         }
                     }
                 }
@@ -54,6 +57,7 @@ namespace CacheManager.Redis
             lock (configLock)
             {
                 NotNull(configuration, nameof(configuration));
+                NotNullOrWhiteSpace(configuration.Key, nameof(configuration.Key));
 
                 if (!Configurations.ContainsKey(configuration.Key))
                 {
@@ -77,6 +81,9 @@ namespace CacheManager.Redis
 
             if (!Configurations.ContainsKey(configurationName))
             {
+#if NETSTANDARD
+                throw new InvalidOperationException("No configuration added for configuration name " + configurationName);
+#else
                 // check connection strings if there is one matching the name
                 var connectionStringHolder = ConfigurationManager.ConnectionStrings[configurationName];
                 if (connectionStringHolder == null || string.IsNullOrWhiteSpace(connectionStringHolder.ConnectionString))
@@ -85,12 +92,14 @@ namespace CacheManager.Redis
                 }
 
                 var configuration = new RedisConfiguration(configurationName, connectionStringHolder.ConnectionString);
-                Configurations.Add(configurationName, configuration);
+                AddConfiguration(configuration);
+#endif
             }
 
             return Configurations[configurationName];
         }
 
+#if !NETSTANDARD
         /// <summary>
         /// Loads the configuration.
         /// </summary>
@@ -182,5 +191,6 @@ namespace CacheManager.Redis
         {
             LoadConfiguration(RedisConfigurationSection.DefaultSectionName);
         }
+#endif
     }
 }

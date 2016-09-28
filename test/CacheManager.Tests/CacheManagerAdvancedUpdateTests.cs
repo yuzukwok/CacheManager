@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using CacheManager.Core;
 using CacheManager.Core.Internal;
+using CacheManager.Core.Logging;
 using FluentAssertions;
 using Xunit;
 
@@ -16,40 +17,6 @@ namespace CacheManager.Tests
 #endif
     public class CacheManagerAdvancedUpdateTests
     {
-        [Fact]
-        [ReplaceCulture]
-        public void UpdateItemConfig_Default()
-        {
-            // arrange act
-            Func<UpdateItemConfig> act = () => new UpdateItemConfig();
-
-            // assert
-            act().ShouldBeEquivalentTo(new { MaxRetries = int.MaxValue, VersionConflictOperation = VersionConflictHandling.EvictItemFromOtherCaches });
-        }
-
-        [Fact]
-        [ReplaceCulture]
-        public void UpdateItemConfig_Ctor()
-        {
-            // arrange act
-            Func<UpdateItemConfig> act = () => new UpdateItemConfig(101, VersionConflictHandling.Ignore);
-
-            // assert
-            act().ShouldBeEquivalentTo(new { MaxRetries = 101, VersionConflictOperation = VersionConflictHandling.Ignore });
-        }
-
-        [Fact]
-        [ReplaceCulture]
-        public void UpdateItemConfig_Ctor_InvalidRetries()
-        {
-            // arrange act
-            Action act = () => new UpdateItemConfig(-10, VersionConflictHandling.Ignore);
-
-            // assert
-            act.ShouldThrow<ArgumentException>()
-                .WithMessage("maxRetries must be *0*");
-        }
-
         [Fact]
         [ReplaceCulture]
         public void UpdateItemResult_ForSuccess()
@@ -106,16 +73,11 @@ namespace CacheManager.Tests
                 putCalls: Enumerable.Repeat<Action>(() => putCalls++, 5).ToArray(),
                 removeCalls: Enumerable.Repeat<Action>(() => removeCalls++, 5).ToArray());
 
-            cache.Configuration.CacheUpdateMode = CacheUpdateMode.Up;
-
-            // the update config setting it to Ignore: update handling should be ignore, update was success, items shoudl get evicted from others
-            UpdateItemConfig updateConfig = new UpdateItemConfig(0, VersionConflictHandling.Ignore);
-
             // act
             using (cache)
             {
                 string value;
-                var updateResult = cache.TryUpdate("key", updateFunc, updateConfig, out value);
+                var updateResult = cache.TryUpdate("key", updateFunc, 1, out value);
 
                 // assert
                 updateCalls.Should().Be(1, "first handle should have been invoked");
@@ -148,21 +110,16 @@ namespace CacheManager.Tests
                 putCalls: Enumerable.Repeat<Action>(() => putCalls++, 5).ToArray(),
                 removeCalls: Enumerable.Repeat<Action>(() => removeCalls++, 5).ToArray());
 
-            cache.Configuration.CacheUpdateMode = CacheUpdateMode.Up;
-
-            // the update config setting it to Ignore
-            UpdateItemConfig updateConfig = new UpdateItemConfig(0, VersionConflictHandling.EvictItemFromOtherCaches);
-
             // act
             using (cache)
             {
                 string value;
-                var updateResult = cache.TryUpdate("key", updateFunc, updateConfig, out value);
+                var updateResult = cache.TryUpdate("key", updateFunc, 1, out value);
 
                 // assert
-                updateCalls.Should().Be(5, "should iterate through all of them");
+                updateCalls.Should().Be(1, "should exit after the first item did not exist");
                 putCalls.Should().Be(0, "no put calls expected");
-                removeCalls.Should().Be(0);
+                removeCalls.Should().Be(4, "item should be removed from others");
                 updateResult.Should().BeFalse();
             }
         }
@@ -190,19 +147,14 @@ namespace CacheManager.Tests
                 putCalls: Enumerable.Repeat<Action>(() => putCalls++, 5).ToArray(),
                 removeCalls: Enumerable.Repeat<Action>(() => removeCalls++, 5).ToArray());
 
-            cache.Configuration.CacheUpdateMode = CacheUpdateMode.Up;
-
-            // the update config setting it to EvictItemFromOtherCaches
-            UpdateItemConfig updateConfig = new UpdateItemConfig(0, VersionConflictHandling.EvictItemFromOtherCaches);
-
             // act
             using (cache)
             {
                 string value;
-                var updateResult = cache.TryUpdate("key", updateFunc, updateConfig, out value);
+                var updateResult = cache.TryUpdate("key", updateFunc, 1, out value);
 
                 // assert
-                updateCalls.Should().Be(2, "bottom to top");
+                updateCalls.Should().Be(1, "failed because item did not exist");
                 putCalls.Should().Be(0, "no put calls expected");
                 removeCalls.Should().Be(4, "the key should have been removed from the other 4 handles");
                 updateResult.Should().BeFalse("the update in handle 4 was not successful.");
@@ -228,8 +180,8 @@ namespace CacheManager.Tests
                     UpdateItemResult.ForItemDidNotExist<string>(),
                     UpdateItemResult.ForItemDidNotExist<string>(),
                     UpdateItemResult.ForItemDidNotExist<string>(),
-                    UpdateItemResult.ForSuccess("some value", true, 100),
-                    UpdateItemResult.ForItemDidNotExist<string>()
+                    UpdateItemResult.ForItemDidNotExist<string>(),
+                    UpdateItemResult.ForSuccess("some value", true, 100)
                 },
                 putCalls: Enumerable.Repeat<Action>(() => putCalls++, 5).ToArray(),
                 removeCalls: Enumerable.Repeat<Action>(() => removeCalls++, 5).ToArray(),
@@ -243,22 +195,17 @@ namespace CacheManager.Tests
                 },
                 addCalls: Enumerable.Repeat<Func<bool>>(() => { addCalls++; return true; }, 5).ToArray());
 
-            cache.Configuration.CacheUpdateMode = CacheUpdateMode.Up;
-
-            // the update config setting it to UpdateOtherCaches
-            UpdateItemConfig updateConfig = new UpdateItemConfig(0, VersionConflictHandling.UpdateOtherCaches);
-
             // act
             using (cache)
             {
                 string value;
-                var updateResult = cache.TryUpdate("key", updateFunc, updateConfig, out value);
+                var updateResult = cache.TryUpdate("key", updateFunc, 1, out value);
 
                 // assert
-                updateCalls.Should().Be(2, "second from below did update");
+                updateCalls.Should().Be(1, "first succeeds second fails");
                 putCalls.Should().Be(0, "no puts");
-                addCalls.Should().Be(1, "one below the one updating");
-                removeCalls.Should().Be(3, "3 above");
+                addCalls.Should().Be(0, "no adds");
+                removeCalls.Should().Be(4, "should remove from all others");
                 updateResult.Should().BeTrue("updated successfully.");
             }
         }
@@ -318,9 +265,10 @@ namespace CacheManager.Tests
 
     public class MockCacheHandle<TCacheValue> : BaseCacheHandle<TCacheValue>
     {
-        public MockCacheHandle(ICacheManager<TCacheValue> manager, CacheHandleConfiguration configuration)
-            : base(manager, configuration)
+        public MockCacheHandle(CacheManagerConfiguration managerConfiguration, CacheHandleConfiguration configuration, ILoggerFactory loggerFactory)
+            : base(managerConfiguration, configuration)
         {
+            this.Logger = loggerFactory.CreateLogger(this);
             this.AddCall = () => true;
             this.PutCall = () => { };
             this.RemoveCall = () => { };
@@ -341,6 +289,8 @@ namespace CacheManager.Tests
 
         public override int Count => 0;
 
+        protected override ILogger Logger { get; }
+
         public override void Clear()
         {
         }
@@ -349,13 +299,13 @@ namespace CacheManager.Tests
         {
         }
 
-        public override UpdateItemResult<TCacheValue> Update(string key, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config)
+        public override UpdateItemResult<TCacheValue> Update(string key, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
         {
             this.UpdateCall();
             return this.UpdateValue;
         }
 
-        public override UpdateItemResult<TCacheValue> Update(string key, string region, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config)
+        public override UpdateItemResult<TCacheValue> Update(string key, string region, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
         {
             this.UpdateCall();
             return this.UpdateValue;

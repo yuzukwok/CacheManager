@@ -1,4 +1,5 @@
-﻿using System;
+﻿#if !DNXCORE50
+using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using CacheManager.Core;
@@ -29,7 +30,7 @@ namespace CacheManager.Tests
             var cache = CacheFactory.FromConfiguration<object>(cfg);
 
             // assert
-            cache.Configuration.CacheUpdateMode.Should().Be(CacheUpdateMode.Up);
+            cache.Configuration.UpdateMode.Should().Be(CacheUpdateMode.Up);
             cache.CacheHandles.Count().Should().Be(3);
             AssertCacheHandleConfig(cache.CacheHandles.ElementAt(0), "h1", ExpirationMode.None, new TimeSpan(0, 0, 50));
             AssertCacheHandleConfig(cache.CacheHandles.ElementAt(1), "h2", ExpirationMode.Absolute, new TimeSpan(0, 20, 0));
@@ -48,7 +49,7 @@ namespace CacheManager.Tests
             var cache = CacheFactory.FromConfiguration<object>(cfg);
 
             // assert
-            cache.Configuration.CacheUpdateMode.Should().Be(CacheUpdateMode.Up);
+            cache.Configuration.UpdateMode.Should().Be(CacheUpdateMode.Up);
             cache.CacheHandles.Count().Should().Be(3);
             AssertCacheHandleConfig(cache.CacheHandles.ElementAt(0), "h1", ExpirationMode.None, new TimeSpan(0, 0, 50));
             AssertCacheHandleConfig(cache.CacheHandles.ElementAt(1), "h2", ExpirationMode.Absolute, new TimeSpan(0, 20, 0));
@@ -67,7 +68,7 @@ namespace CacheManager.Tests
             var cache = CacheFactory.FromConfiguration<object>(cfg);
 
             // assert
-            cache.Configuration.CacheUpdateMode.Should().Be(CacheUpdateMode.Full);
+            cache.Configuration.UpdateMode.Should().Be(CacheUpdateMode.Full);
             cache.CacheHandles.Count().Should().Be(4);
             AssertCacheHandleConfig(cache.CacheHandles.ElementAt(0), "h1", ExpirationMode.None, new TimeSpan(0, 0, 50));
             AssertCacheHandleConfig(cache.CacheHandles.ElementAt(1), "h2", ExpirationMode.Sliding, new TimeSpan(0, 5, 0));
@@ -75,12 +76,9 @@ namespace CacheManager.Tests
             AssertCacheHandleConfig(cache.CacheHandles.ElementAt(3), "h4", ExpirationMode.Absolute, new TimeSpan(0, 20, 0));
         }
 
-#if DNX451
-        [Fact(Skip = "DNX doesn't read from app.config")]
-#else
-
+#if !NO_APP_CONFIG
         [Fact]
-#endif
+        [Trait("category", "NotOnMono")]
         public void Cfg_Valid_CfgFile_DefaultSysMemCache()
         {
             // arrange
@@ -98,10 +96,11 @@ namespace CacheManager.Tests
             memHandle.CacheSettings.Get(2).Should().Be("00:10:00");
 
             // assert
-            cache.Configuration.CacheUpdateMode.Should().Be(CacheUpdateMode.None);
+            cache.Configuration.UpdateMode.Should().Be(CacheUpdateMode.None);
             cache.CacheHandles.Count().Should().Be(1);
             AssertCacheHandleConfig(cache.CacheHandles.ElementAt(0), "default", ExpirationMode.Sliding, new TimeSpan(0, 5, 0));
         }
+#endif
 
         [Fact]
         public void Cfg_Valid_CfgFile_EnabledStatsAndPerformanceCounters()
@@ -161,12 +160,36 @@ namespace CacheManager.Tests
                 .ShouldAllBeEquivalentTo(Enumerable.Repeat(false, cache.CacheHandles.Count()));
         }
 
+        [Fact]
+        [Trait("category", "NotOnMono")]
+        public void Cfg_Valid_CfgFile_AllDefaults()
+        {
+            // arrange
+            string fileName = GetCfgFileName(@"/Configuration/configuration.valid.allFeatures.config");
+            string cacheName = "onlyDefaultsCache";
+
+            // act
+            var cfg = ConfigurationBuilder.LoadConfigurationFile(fileName, cacheName);
+            var cache = CacheFactory.FromConfiguration<string>(cfg);
+
+            // assert
+            cache.Configuration.UpdateMode.Should().Be(CacheUpdateMode.Up);
+            cache.Configuration.SerializerType.Should().BeNull();
+            cache.Configuration.LoggerFactoryType.Should().BeNull();
+            cache.Configuration.BackplaneType.Should().BeNull();
+            cache.Configuration.RetryTimeout.Should().Be(100);
+            cache.Configuration.MaxRetries.Should().Be(50);
+            cache.CacheHandles.Count().Should().Be(1);
+            AssertCacheHandleConfig(cache.CacheHandles.ElementAt(0), "defaultsHandle", ExpirationMode.None, TimeSpan.Zero);
+        }
+
         private static void AssertCacheHandleConfig<T>(BaseCacheHandle<T> handle, string name, ExpirationMode mode, TimeSpan timeout)
         {
             var cfg = handle.Configuration;
-            cfg.HandleName.Should().Be(name);
+            cfg.Name.Should().Be(name);
             cfg.ExpirationMode.Should().Be(mode);
             cfg.ExpirationTimeout.Should().Be(timeout);
         }
     }
 }
+#endif

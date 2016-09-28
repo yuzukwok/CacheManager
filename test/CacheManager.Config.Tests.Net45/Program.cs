@@ -8,11 +8,12 @@ namespace CacheManager.Config.Tests
     using System.IO;
     using System.Web;
     using CacheManager.Web;
+    using Core.Logging;
 
     internal class SystemWebCacheHandleWrapper<TCacheValue> : SystemWebCacheHandle<TCacheValue>
     {
-        public SystemWebCacheHandleWrapper(ICacheManager<TCacheValue> manager, CacheHandleConfiguration configuration)
-            : base(manager, configuration)
+        public SystemWebCacheHandleWrapper(CacheManagerConfiguration managerConfiguration, CacheHandleConfiguration configuration, ILoggerFactory loggerFactory)
+            : base(managerConfiguration, configuration, loggerFactory)
         {
         }
 
@@ -53,18 +54,19 @@ namespace CacheManager.Config.Tests
                 cfg.WithRedisCacheHandle("redis", true)
                     .EnablePerformanceCounters();
 
-                cfg.WithRedisBackPlate("redis");
+                cfg.WithRedisBackplane("redis");
 
                 cfg.WithRedisConfiguration("redis", config =>
                 {
                     config.WithAllowAdmin()
                         .WithDatabase(0)
                         .WithEndpoint("localhost", 6379)
+                        .WithEndpoint("localhost", 6380)
                         .WithConnectionTimeout(1000);
                 });
 
                 cfg.WithMaxRetries(10);
-                cfg.WithRetryTimeout(1000);
+                cfg.WithRetryTimeout(10);
             });
 
             for (int i = 0; i < iterations; i++)

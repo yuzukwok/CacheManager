@@ -1,20 +1,19 @@
-﻿{
+ {
   "version": "1.0.0-*",
   "description": "CacheManager.Examples Console Application",
   "authors": [ "MICHA" ],
-  "tags": [ "" ],
-  "projectUrl": "",
-  "licenseUrl": "",
-
-  "compilationOptions": {
+  "buildOptions": {
     "emitEntryPoint": true
   },
 
   "dependencies": {
-    "CacheManager.Core": "",
-    "CacheManager.SystemRuntimeCaching": "",
-    "CacheManager.StackExchange.Redis": "",
-    "Unity": "4.0.2"
+    "CacheManager.Core": { "target": "project" },
+    "CacheManager.Microsoft.Extensions.Configuration": { "target": "project" },
+    "CacheManager.Microsoft.Extensions.Logging": { "target": "project" },
+    "CacheManager.Serialization.Json": { "target": "project" },
+    "Microsoft.Extensions.Configuration.Json": "1.0.0",
+    "Microsoft.Extensions.Logging.Console": "1.0.0",
+    "Unity": "4.0.1"
   },
 
   "commands": {
@@ -22,7 +21,11 @@
   },
 
   "frameworks": {
-    "dnx451": {
+    "net451": {
+      "dependencies": {
+        "CacheManager.StackExchange.Redis": { "target": "project" },
+        "CacheManager.SystemRuntimeCaching": { "target": "project" }
+      }
     }
   }
 }

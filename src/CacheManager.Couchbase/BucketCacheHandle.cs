@@ -1,9 +1,9 @@
 ﻿using System;
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using CacheManager.Core;
 using CacheManager.Core.Internal;
+using CacheManager.Core.Logging;
 using Couchbase.Configuration.Client;
 using Couchbase.Core;
 using Newtonsoft.Json.Linq;
@@ -26,20 +26,24 @@ namespace CacheManager.Couchbase
         /// <summary>
         /// Initializes a new instance of the <see cref="BucketCacheHandle{TCacheValue}"/> class.
         /// </summary>
-        /// <param name="manager">The manager.</param>
-        /// <param name="configuration">The configuration.</param>
+        /// <param name="managerConfiguration">The manager configuration.</param>
+        /// <param name="configuration">The cache handle configuration.</param>
+        /// <param name="loggerFactory">The logger factory.</param>
         /// <exception cref="System.InvalidOperationException">
         /// If <c>configuration.HandleName</c> is not valid.
         /// </exception>
-        public BucketCacheHandle(ICacheManager<TCacheValue> manager, CacheHandleConfiguration configuration)
-            : base(manager, configuration)
+        public BucketCacheHandle(CacheManagerConfiguration managerConfiguration, CacheHandleConfiguration configuration, ILoggerFactory loggerFactory)
+            : base(managerConfiguration, configuration)
         {
             NotNull(configuration, nameof(configuration));
+            NotNull(loggerFactory, nameof(loggerFactory));
+
+            this.Logger = loggerFactory.CreateLogger(this);
 
             // we can configure the bucket name by having "<configKey>:<bucketName>" as handle's
             // name value
-            var nameParts = configuration.HandleName.Split(new[] { ":" }, StringSplitOptions.RemoveEmptyEntries);
-            Ensure(nameParts.Length > 0, "Handle name is not valid {0}", configuration.HandleName);
+            var nameParts = configuration.Key.Split(new[] { ":" }, StringSplitOptions.RemoveEmptyEntries);
+            Ensure(nameParts.Length > 0, "Handle key is not valid {0}", configuration.Key);
 
             this.configurationName = nameParts[0];
 
@@ -58,6 +62,9 @@ namespace CacheManager.Couchbase
         /// </summary>
         /// <value>The count.</value>
         public override int Count => (int)this.Stats.GetStatistic(CacheStatsCounterType.Items);
+
+        /// <inheritdoc />
+        protected override ILogger Logger { get; }
 
         /// <summary>
         /// Clears this cache, removing all items in the base cache and all regions.
@@ -136,21 +143,20 @@ namespace CacheManager.Couchbase
             var fullkey = GetKey(key, region);
             var result = this.bucket.Get<CacheItem<TCacheValue>>(fullkey);
 
-            //// TODO: implement sliding expiration whenever the guys from couchbase actually
-            ////       implement that feature into that client...
-
             if (result.Success)
             {
                 var cacheItem = result.Value;
-                if (cacheItem.Value.GetType() == typeof(JValue))
+                if (cacheItem.Value is JToken)
                 {
-                    var value = cacheItem.Value as JValue;
+                    var value = cacheItem.Value as JToken;
                     cacheItem = cacheItem.WithValue((TCacheValue)value.ToObject(cacheItem.ValueType));
                 }
-                else if (cacheItem.Value.GetType() == typeof(JObject))
+
+                // TODO: test sliding
+                // extend sliding expiration
+                if (cacheItem.ExpirationMode == ExpirationMode.Sliding)
                 {
-                    var value = cacheItem.Value as JObject;
-                    cacheItem = cacheItem.WithValue((TCacheValue)value.ToObject(cacheItem.ValueType));
+                    this.bucket.Touch(fullkey, cacheItem.ExpirationTimeout);
                 }
 
                 return cacheItem;

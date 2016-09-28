@@ -1,0 +1,27 @@
+﻿{
+  "version": "1.0.0-*",
+  "description": "CacheManager.Backplane.App Console Application",
+  "authors": [ "Micha" ],
+  "buildOptions": {
+    "emitEntryPoint": true,
+    "copyToOutput": [
+      "cache.json"
+    ]
+  },
+
+  "dependencies": {
+    "CacheManager.StackExchange.Redis": { "target": "project" },
+    "CacheManager.Serialization.Json": { "target": "project" },
+    "CacheManager.Microsoft.Extensions.Logging": { "target": "project" },
+    "CacheManager.Microsoft.Extensions.Configuration": { "target": "project" },
+    "Microsoft.Extensions.Configuration.Json": "1.0.0"
+  },
+
+  "commands": {
+    "CacheManager.Backplane.App": "CacheManager.Backplane.App"
+  },
+
+  "frameworks": {
+    "net451": { }
+  }
+}

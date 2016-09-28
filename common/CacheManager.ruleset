@@ -6,11 +6,14 @@
     <Rule Id="CA1020" Action="None" />
     <Rule Id="CA1026" Action="None" />
     <Rule Id="CA1303" Action="None" />
+    <Rule Id="CA1305" Action="None" />
     <Rule Id="CA1704" Action="None" />
+    <Rule Id="CA2202" Action="None" />
     <Rule Id="CA2210" Action="None" />
   </Rules>
   <Rules AnalyzerId="StyleCop.Analyzers" RuleNamespace="StyleCop.Analyzers">
     <Rule Id="SA1025" Action="None" />
+    <Rule Id="SA1028" Action="None" />
     <Rule Id="SA1118" Action="None" />
     <Rule Id="SA1200" Action="None" />
     <Rule Id="SA1402" Action="None" />

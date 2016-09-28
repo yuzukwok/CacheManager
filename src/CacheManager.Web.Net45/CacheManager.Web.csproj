@@ -37,6 +37,7 @@
     <DocumentationFile>bin\Release\CacheManager.Web.XML</DocumentationFile>
     <CodeAnalysisRuleSet>..\..\common\CacheManager.ruleset</CodeAnalysisRuleSet>
     <RunCodeAnalysis>true</RunCodeAnalysis>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <PropertyGroup>
     <StartupObject />
@@ -60,14 +61,14 @@
     <Compile Include="..\CacheManager.Web\CacheManagerOutputCacheProvider.cs">
       <Link>CacheManagerOutputCacheProvider.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.Web\ConfigurationBuilderExtensions.cs">
-      <Link>ConfigurationBuilderExtensions.cs</Link>
-    </Compile>
     <Compile Include="..\CacheManager.Web\ContextFactory.cs">
       <Link>ContextFactory.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.Web\SystemWebCacheHandle`1.cs">
       <Link>SystemWebCacheHandle`1.cs</Link>
+    </Compile>
+    <Compile Include="..\CacheManager.Web\WebConfigurationBuilderExtensions.cs">
+      <Link>WebConfigurationBuilderExtensions.cs</Link>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
@@ -81,9 +82,9 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\Newtonsoft.Json.dll" />
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\StyleCop.Analyzers.CodeFixes.dll" />
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\StyleCop.Analyzers.dll" />
+    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0\analyzers\dotnet\cs\Newtonsoft.Json.dll" />
+    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0\analyzers\dotnet\cs\StyleCop.Analyzers.CodeFixes.dll" />
+    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0\analyzers\dotnet\cs\StyleCop.Analyzers.dll" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

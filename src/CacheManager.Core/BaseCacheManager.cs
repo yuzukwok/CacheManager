@@ -4,43 +4,58 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
 using CacheManager.Core.Internal;
+using CacheManager.Core.Logging;
 using static CacheManager.Core.Utility.Guard;
 
 namespace CacheManager.Core
 {
     /// <summary>
-    /// The BaseCacheManager implements <see cref="ICacheManager{T}"/> and is the main class which
-    /// gets constructed by <see cref="CacheFactory"/>.
-    /// <para>
-    /// The cache manager manages the list of <see cref="BaseCacheHandle{T}"/>'s which have been
-    /// added. It will keep them in sync depending on the configuration.
-    /// </para>
+    /// The <see cref="BaseCacheManager{TCacheValue}"/> implements <see cref="ICacheManager{TCacheValue}"/> and is the main class
+    /// of this library.
+    /// The cache manager delegates all cache operations to the list of <see cref="BaseCacheHandle{T}"/>'s which have been
+    /// added. It will keep them in sync according to rules and depending on the configuration.
     /// </summary>
     /// <typeparam name="TCacheValue">The type of the cache value.</typeparam>
     public sealed class BaseCacheManager<TCacheValue> : BaseCache<TCacheValue>, ICacheManager<TCacheValue>, IDisposable
     {
-        /// <summary>
-        /// The cache back plate.
-        /// </summary>
-        private CacheBackPlate cacheBackPlate;
-
-        /// <summary>
-        /// The cache handles collection.
-        /// </summary>
-        private BaseCacheHandle<TCacheValue>[] cacheHandles;
+        private readonly bool logTrace = false;
+        private readonly BaseCacheHandle<TCacheValue>[] cacheHandles;
+        private readonly CacheBackplane cacheBackplane;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="BaseCacheManager{TCacheValue}"/> class
-        /// using the specified configuration.
+        /// using the specified <paramref name="configuration"/>.
+        /// If the name of the <paramref name="configuration"/> is defined, the cache manager will
+        /// use it. Otherwise a random string will be generated.
         /// </summary>
-        /// <param name="name">The cache name.</param>
         /// <param name="configuration">
-        /// The configuration which defines the name of the manager and contains information of the
-        /// cache handles this instance should manage.
+        /// The configuration which defines the structure and complexity of the cache manager.
         /// </param>
         /// <exception cref="System.ArgumentNullException">
         /// When <paramref name="configuration"/> is null.
         /// </exception>
+        /// <see cref="CacheFactory"/>
+        /// <see cref="ConfigurationBuilder"/>
+        /// <see cref="BaseCacheHandle{TCacheValue}"/>
+        public BaseCacheManager(CacheManagerConfiguration configuration)
+            : this(configuration?.Name ?? Guid.NewGuid().ToString(), configuration)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BaseCacheManager{TCacheValue}"/> class
+        /// using the specified <paramref name="name"/> and <paramref name="configuration"/>.
+        /// </summary>
+        /// <param name="name">The cache name.</param>
+        /// <param name="configuration">
+        /// The configuration which defines the structure and complexity of the cache manager.
+        /// </param>
+        /// <exception cref="System.ArgumentNullException">
+        /// When <paramref name="name"/> or <paramref name="configuration"/> is null.
+        /// </exception>
+        /// <see cref="CacheFactory"/>
+        /// <see cref="ConfigurationBuilder"/>
+        /// <see cref="BaseCacheHandle{TCacheValue}"/>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "nope")]
         public BaseCacheManager(string name, CacheManagerConfiguration configuration)
         {
@@ -49,11 +64,27 @@ namespace CacheManager.Core
 
             this.Name = name;
             this.Configuration = configuration;
-            this.cacheHandles = CacheReflectionHelper.CreateCacheHandles(this).ToArray();
 
-            if (this.Configuration.HasBackPlate)
+            var loggerFactory = CacheReflectionHelper.CreateLoggerFactory(configuration);
+            var serializer = CacheReflectionHelper.CreateSerializer(configuration, loggerFactory);
+
+            this.Logger = loggerFactory.CreateLogger(this);
+            this.logTrace = this.Logger.IsEnabled(LogLevel.Trace);
+            this.Logger.LogInfo("Cache manager: adding cache handles...");
+            try
             {
-                this.RegisterCacheBackPlate(CacheReflectionHelper.CreateBackPlate(this));
+                this.cacheHandles = CacheReflectionHelper.CreateCacheHandles(this, loggerFactory, serializer).ToArray();
+
+                this.cacheBackplane = CacheReflectionHelper.CreateBackplane(configuration, loggerFactory);
+                if (this.cacheBackplane != null)
+                {
+                    this.RegisterCacheBackplane(this.cacheBackplane);
+                }
+            }
+            catch (Exception ex)
+            {
+                this.Logger.LogError(ex, "Error occurred while creating the cache manager.");
+                throw;
             }
         }
 
@@ -98,7 +129,7 @@ namespace CacheManager.Core
         /// Gets the configuration.
         /// </summary>
         /// <value>The configuration.</value>
-        public CacheManagerConfiguration Configuration { get; }
+        public IReadOnlyCacheManagerConfiguration Configuration { get; }
 
         /// <summary>
         /// Gets a list of cache handles currently registered within the cache manager.
@@ -114,10 +145,19 @@ namespace CacheManager.Core
                     this.cacheHandles));
 
         /// <summary>
+        /// Gets the configured cache backplane.
+        /// </summary>
+        /// <value>The backplane.</value>
+        public CacheBackplane Backplane => this.cacheBackplane;
+
+        /// <summary>
         /// Gets the cache name.
         /// </summary>
         /// <value>The name of the cache.</value>
         public string Name { get; }
+
+        /// <inheritdoc />
+        protected override ILogger Logger { get; }
 
         /// <summary>
         /// Adds an item to the cache or, if the item already exists, updates the item using the
@@ -153,7 +193,7 @@ namespace CacheManager.Core
         /// as Get plus Put.
         /// </remarks>
         public TCacheValue AddOrUpdate(string key, TCacheValue addValue, Func<TCacheValue, TCacheValue> updateValue) =>
-            this.AddOrUpdate(key, addValue, updateValue, new UpdateItemConfig());
+            this.AddOrUpdate(key, addValue, updateValue, 50);
 
         /// <summary>
         /// Adds an item to the cache or, if the item already exists, updates the item using the
@@ -191,7 +231,7 @@ namespace CacheManager.Core
         /// as Get plus Put.
         /// </remarks>
         public TCacheValue AddOrUpdate(string key, string region, TCacheValue addValue, Func<TCacheValue, TCacheValue> updateValue) =>
-            this.AddOrUpdate(key, region, addValue, updateValue, new UpdateItemConfig());
+            this.AddOrUpdate(key, region, addValue, updateValue, 50);
 
         /// <summary>
         /// Adds an item to the cache or, if the item already exists, updates the item using the
@@ -216,20 +256,23 @@ namespace CacheManager.Core
         /// <param name="updateValue">
         /// The function to perform the update in case the item does already exist.
         /// </param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
+        /// <param name="maxRetries">
+        /// The number of tries which should be performed in case of version conflicts.
+        /// If the cache cannot perform an update within the number of <paramref name="maxRetries"/>,
+        /// this method will return <c>Null</c>.
+        /// </param>
         /// <returns>
         /// The value which has been added or updated, or null, if the update was not successful.
         /// </returns>
         /// <exception cref="System.ArgumentNullException">
-        /// If <paramref name="key"/> or <paramref name="updateValue"/> or <paramref name="config"/>
-        /// are null.
+        /// If <paramref name="key"/> or <paramref name="updateValue"/> is null.
         /// </exception>
         /// <remarks>
         /// If the cache does not use a distributed cache system. Update is doing exactly the same
         /// as Get plus Put.
         /// </remarks>
-        public TCacheValue AddOrUpdate(string key, TCacheValue addValue, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config) =>
-            this.AddOrUpdate(new CacheItem<TCacheValue>(key, addValue), updateValue, config);
+        public TCacheValue AddOrUpdate(string key, TCacheValue addValue, Func<TCacheValue, TCacheValue> updateValue, int maxRetries) =>
+            this.AddOrUpdate(new CacheItem<TCacheValue>(key, addValue), updateValue, maxRetries);
 
         /// <summary>
         /// Adds an item to the cache or, if the item already exists, updates the item using the
@@ -255,20 +298,23 @@ namespace CacheManager.Core
         /// <param name="updateValue">
         /// The function to perform the update in case the item does already exist.
         /// </param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
+        /// <param name="maxRetries">
+        /// The number of tries which should be performed in case of version conflicts.
+        /// If the cache cannot perform an update within the number of <paramref name="maxRetries"/>,
+        /// this method will return <c>Null</c>.
+        /// </param>
         /// <returns>
         /// The value which has been added or updated, or null, if the update was not successful.
         /// </returns>
         /// <exception cref="System.ArgumentNullException">
-        /// If <paramref name="key"/> or <paramref name="region"/> or <paramref name="updateValue"/>
-        /// or <paramref name="config"/> are null.
+        /// If <paramref name="key"/> or <paramref name="region"/> or <paramref name="updateValue"/> is null.
         /// </exception>
         /// <remarks>
         /// If the cache does not use a distributed cache system. Update is doing exactly the same
         /// as Get plus Put.
         /// </remarks>
-        public TCacheValue AddOrUpdate(string key, string region, TCacheValue addValue, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config) =>
-            this.AddOrUpdate(new CacheItem<TCacheValue>(key, region, addValue), updateValue, config);
+        public TCacheValue AddOrUpdate(string key, string region, TCacheValue addValue, Func<TCacheValue, TCacheValue> updateValue, int maxRetries) =>
+            this.AddOrUpdate(new CacheItem<TCacheValue>(key, region, addValue), updateValue, maxRetries);
 
         /// <summary>
         /// Adds an item to the cache or, if the item already exists, updates the item using the
@@ -295,7 +341,7 @@ namespace CacheManager.Core
         /// If <paramref name="addItem"/> or <paramref name="updateValue"/> are null.
         /// </exception>
         public TCacheValue AddOrUpdate(CacheItem<TCacheValue> addItem, Func<TCacheValue, TCacheValue> updateValue) =>
-            this.AddOrUpdate(addItem, updateValue, new UpdateItemConfig());
+            this.AddOrUpdate(addItem, updateValue, 50);
 
         /// <summary>
         /// Adds an item to the cache or, if the item already exists, updates the item using the
@@ -315,21 +361,24 @@ namespace CacheManager.Core
         /// </summary>
         /// <param name="addItem">The item which should be added or updated.</param>
         /// <param name="updateValue">The function to perform the update, if the item does exist.</param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
+        /// <param name="maxRetries">
+        /// The number of tries which should be performed in case of version conflicts.
+        /// If the cache cannot perform an update within the number of <paramref name="maxRetries"/>,
+        /// this method will return <c>Null</c>.
+        /// </param>
         /// <returns>
         /// The value which has been added or updated, or null, if the update was not successful.
         /// </returns>
         /// <exception cref="System.ArgumentNullException">
-        /// If <paramref name="addItem"/> or <paramref name="updateValue"/> or
-        /// <paramref name="config"/> are null.
+        /// If <paramref name="addItem"/> or <paramref name="updateValue"/> is null.
         /// </exception>
-        public TCacheValue AddOrUpdate(CacheItem<TCacheValue> addItem, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config)
+        public TCacheValue AddOrUpdate(CacheItem<TCacheValue> addItem, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
         {
             NotNull(addItem, nameof(addItem));
             NotNull(updateValue, nameof(updateValue));
-            NotNull(config, nameof(config));
+            Ensure(maxRetries > 0, "Maximum number of retries must be greater than or equal to zero.");
 
-            return this.AddOrUpdateInternal(addItem, updateValue, config);
+            return this.AddOrUpdateInternal(addItem, updateValue, maxRetries);
         }
 
         /// <summary>
@@ -337,15 +386,31 @@ namespace CacheManager.Core
         /// </summary>
         public override void Clear()
         {
+            this.CheckDisposed();
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Clear: flushing cache...");
+            }
+
             foreach (var handle in this.cacheHandles)
             {
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace("Clear: clearing handle {0}.", handle.Configuration.Name);
+                }
+
                 handle.Clear();
                 handle.Stats.OnClear();
             }
 
-            if (this.Configuration.HasBackPlate)
+            if (this.cacheBackplane != null)
             {
-                this.cacheBackPlate.NotifyClear();
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace("Clear: notifies backplane.");
+                }
+
+                this.cacheBackplane.NotifyClear();
             }
 
             this.TriggerOnClear();
@@ -360,15 +425,31 @@ namespace CacheManager.Core
         {
             NotNullOrWhiteSpace(region, nameof(region));
 
+            this.CheckDisposed();
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Clear region: {0}.", region);
+            }
+
             foreach (var handle in this.cacheHandles)
             {
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace("Clear region: {0} in handle {1}.", region, handle.Configuration.Name);
+                }
+
                 handle.ClearRegion(region);
                 handle.Stats.OnClearRegion(region);
             }
 
-            if (this.Configuration.HasBackPlate)
+            if (this.cacheBackplane != null)
             {
-                this.cacheBackPlate.NotifyClearRegion(region);
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace("Clear region: {0}: notifies backplane [clear region].", region);
+                }
+
+                this.cacheBackplane.NotifyClearRegion(region);
             }
 
             this.TriggerOnClearRegion(region);
@@ -383,8 +464,19 @@ namespace CacheManager.Core
         /// <param name="timeout">The expiration timeout.</param>
         public override void Expire(string key, ExpirationMode mode, TimeSpan timeout)
         {
+            this.CheckDisposed();
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Expire: {0}.", key);
+            }
+
             foreach (var handle in this.cacheHandles)
             {
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace("Expire: {0} on handle {1}.", key, handle.Configuration.Name);
+                }
+
                 handle.Expire(key, mode, timeout);
             }
         }
@@ -399,10 +491,48 @@ namespace CacheManager.Core
         /// <param name="timeout">The expiration timeout.</param>
         public override void Expire(string key, string region, ExpirationMode mode, TimeSpan timeout)
         {
+            this.CheckDisposed();
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Expire: {0} {1}.", key, region);
+            }
+
             foreach (var handle in this.cacheHandles)
             {
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace("Expire: {0} {1} on handle {2}.", key, region, handle.Configuration.Name);
+                }
+
                 handle.Expire(key, region, mode, timeout);
             }
+        }
+
+        /// <inheritdoc />
+        public TCacheValue GetOrAdd(string key, TCacheValue value)
+            => this.GetOrAdd(key, (k) => value);
+
+        /// <inheritdoc />
+        public TCacheValue GetOrAdd(string key, string region, TCacheValue value)
+            => this.GetOrAdd(key, region, (k, r) => value);
+
+        /// <inheritdoc />
+        public TCacheValue GetOrAdd(string key, Func<string, TCacheValue> valueFactory)
+        {
+            NotNullOrWhiteSpace(key, nameof(key));
+            NotNull(valueFactory, nameof(valueFactory));
+
+            return this.GetOrAddInternal(key, null, (k, r) => valueFactory(k));
+        }
+
+        /// <inheritdoc />
+        public TCacheValue GetOrAdd(string key, string region, Func<string, string, TCacheValue> valueFactory)
+        {
+            NotNullOrWhiteSpace(key, nameof(key));
+            NotNullOrWhiteSpace(region, nameof(region));
+            NotNull(valueFactory, nameof(valueFactory));
+
+            return this.GetOrAddInternal(key, region, (k, r) => valueFactory(k, r));
         }
 
         /// <summary>
@@ -412,7 +542,7 @@ namespace CacheManager.Core
         /// A <see cref="string" /> that represents this instance.
         /// </returns>
         public override string ToString() =>
-            string.Format(CultureInfo.InvariantCulture, "{0} Handles: {1}", this.Name, this.cacheHandles.Length);
+            string.Format(CultureInfo.InvariantCulture, "Name: {0}, Handles: [{1}]", this.Name, string.Join(",", this.cacheHandles.Select(p => p.GetType().Name)));
 
         /// <summary>
         /// Tries to update an existing key in the cache.
@@ -441,7 +571,7 @@ namespace CacheManager.Core
         /// as Get plus Put.
         /// </remarks>
         public bool TryUpdate(string key, Func<TCacheValue, TCacheValue> updateValue, out TCacheValue value) =>
-            this.TryUpdate(key, updateValue, new UpdateItemConfig(), out value);
+            this.TryUpdate(key, updateValue, 50, out value);
 
         /// <summary>
         /// Tries to update an existing key in the cache.
@@ -472,7 +602,7 @@ namespace CacheManager.Core
         /// as Get plus Put.
         /// </remarks>
         public bool TryUpdate(string key, string region, Func<TCacheValue, TCacheValue> updateValue, out TCacheValue value) =>
-            this.TryUpdate(key, region, updateValue, new UpdateItemConfig(), out value);
+            this.TryUpdate(key, region, updateValue, 50, out value);
 
         /// <summary>
         /// Tries to update an existing key in the cache.
@@ -491,24 +621,27 @@ namespace CacheManager.Core
         /// </summary>
         /// <param name="key">The key to update.</param>
         /// <param name="updateValue">The function to perform the update.</param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
+        /// <param name="maxRetries">
+        /// The number of tries which should be performed in case of version conflicts.
+        /// If the cache cannot perform an update within the number of <paramref name="maxRetries"/>,
+        /// this method will return <c>False</c>.
+        /// </param>
         /// <param name="value">The updated value, or null, if the update was not successful.</param>
         /// <returns><c>True</c> if the update operation was successful, <c>False</c> otherwise.</returns>
         /// <exception cref="System.ArgumentNullException">
-        /// If <paramref name="key"/> or <paramref name="updateValue"/> or <paramref name="config"/>
-        /// are null.
+        /// If <paramref name="key"/> or <paramref name="updateValue"/> is null.
         /// </exception>
         /// <remarks>
         /// If the cache does not use a distributed cache system. Update is doing exactly the same
         /// as Get plus Put.
         /// </remarks>
-        public bool TryUpdate(string key, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config, out TCacheValue value)
+        public bool TryUpdate(string key, Func<TCacheValue, TCacheValue> updateValue, int maxRetries, out TCacheValue value)
         {
             NotNullOrWhiteSpace(key, nameof(key));
             NotNull(updateValue, nameof(updateValue));
-            NotNull(config, nameof(config));
+            Ensure(maxRetries > 0, "Maximum number of retries must be greater than or equal to zero.");
 
-            return this.UpdateInternal(this.cacheHandles, key, updateValue, config, out value);
+            return this.UpdateInternal(this.cacheHandles, key, updateValue, maxRetries, out value);
         }
 
         /// <summary>
@@ -529,25 +662,28 @@ namespace CacheManager.Core
         /// <param name="key">The key to update.</param>
         /// <param name="region">The region of the key to update.</param>
         /// <param name="updateValue">The function to perform the update.</param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
+        /// <param name="maxRetries">
+        /// The number of tries which should be performed in case of version conflicts.
+        /// If the cache cannot perform an update within the number of <paramref name="maxRetries"/>,
+        /// this method will return <c>False</c>.
+        /// </param>
         /// <param name="value">The updated value, or null, if the update was not successful.</param>
         /// <returns><c>True</c> if the update operation was successful, <c>False</c> otherwise.</returns>
         /// <exception cref="System.ArgumentNullException">
-        /// If <paramref name="key"/> or <paramref name="region"/> or <paramref name="updateValue"/>
-        /// or <paramref name="config"/> are null.
+        /// If <paramref name="key"/> or <paramref name="region"/> or <paramref name="updateValue"/> is null.
         /// </exception>
         /// <remarks>
         /// If the cache does not use a distributed cache system. Update is doing exactly the same
         /// as Get plus Put.
         /// </remarks>
-        public bool TryUpdate(string key, string region, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config, out TCacheValue value)
+        public bool TryUpdate(string key, string region, Func<TCacheValue, TCacheValue> updateValue, int maxRetries, out TCacheValue value)
         {
             NotNullOrWhiteSpace(key, nameof(key));
             NotNullOrWhiteSpace(region, nameof(region));
             NotNull(updateValue, nameof(updateValue));
-            NotNull(config, nameof(config));
+            Ensure(maxRetries > 0, "Maximum number of retries must be greater than or equal to zero.");
 
-            return this.UpdateInternal(this.cacheHandles, key, region, updateValue, config, out value);
+            return this.UpdateInternal(this.cacheHandles, key, region, updateValue, maxRetries, out value);
         }
 
         /// <summary>
@@ -576,7 +712,7 @@ namespace CacheManager.Core
         /// If <paramref name="key"/> or <paramref name="updateValue"/> is null.
         /// </exception>
         public TCacheValue Update(string key, Func<TCacheValue, TCacheValue> updateValue) =>
-            this.Update(key, updateValue, new UpdateItemConfig());
+            this.Update(key, updateValue, 50);
 
         /// <summary>
         /// Updates an existing key in the cache.
@@ -606,7 +742,7 @@ namespace CacheManager.Core
         /// is null.
         /// </exception>
         public TCacheValue Update(string key, string region, Func<TCacheValue, TCacheValue> updateValue) =>
-            this.Update(key, region, updateValue, new UpdateItemConfig());
+            this.Update(key, region, updateValue, 50);
 
         /// <summary>
         /// Updates an existing key in the cache.
@@ -629,16 +765,19 @@ namespace CacheManager.Core
         /// </remarks>
         /// <param name="key">The key to update.</param>
         /// <param name="updateValue">The function to perform the update.</param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
-        /// <returns><c>True</c> if the update operation was successfully, <c>False</c> otherwise.</returns>
+        /// <param name="maxRetries">
+        /// The number of tries which should be performed in case of version conflicts.
+        /// If the cache cannot perform an update within the number of <paramref name="maxRetries"/>,
+        /// this method will return <c>Null</c>.
+        /// </param>
+        /// <returns>The updated value, or null, if the update was not successful.</returns>
         /// <exception cref="System.ArgumentNullException">
-        /// If <paramref name="key"/> or <paramref name="updateValue"/> or <paramref name="config"/>
-        /// is null.
+        /// If <paramref name="key"/> or <paramref name="updateValue"/> is null.
         /// </exception>
-        public TCacheValue Update(string key, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config)
+        public TCacheValue Update(string key, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
         {
             TCacheValue value;
-            this.TryUpdate(key, updateValue, config, out value);
+            this.TryUpdate(key, updateValue, maxRetries, out value);
             return value;
         }
 
@@ -664,16 +803,19 @@ namespace CacheManager.Core
         /// <param name="key">The key to update.</param>
         /// <param name="region">The region of the key to update.</param>
         /// <param name="updateValue">The function to perform the update.</param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
-        /// <returns><c>True</c> if the update operation was successfully, <c>False</c> otherwise.</returns>
+        /// <param name="maxRetries">
+        /// The number of tries which should be performed in case of version conflicts.
+        /// If the cache cannot perform an update within the number of <paramref name="maxRetries"/>,
+        /// this method will return <c>Null</c>.
+        /// </param>
+        /// <returns>The updated value, or null, if the update was not successful.</returns>
         /// <exception cref="System.ArgumentNullException">
-        /// If <paramref name="key"/> or <paramref name="region"/> or <paramref name="updateValue"/>
-        /// or <paramref name="config"/> is null.
+        /// If <paramref name="key"/> or <paramref name="region"/> or <paramref name="updateValue"/> is null.
         /// </exception>
-        public TCacheValue Update(string key, string region, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config)
+        public TCacheValue Update(string key, string region, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
         {
             TCacheValue value;
-            this.TryUpdate(key, region, updateValue, config, out value);
+            this.TryUpdate(key, region, updateValue, maxRetries, out value);
             return value;
         }
 
@@ -689,14 +831,29 @@ namespace CacheManager.Core
         {
             NotNull(item, nameof(item));
 
+            this.CheckDisposed();
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Add: {0} {1}", item.Key, item.Region);
+            }
+
             var result = false;
 
             // also inverse it, so that the lowest level gets invoked first
             for (int handleIndex = this.cacheHandles.Length - 1; handleIndex >= 0; handleIndex--)
             {
                 var handle = this.cacheHandles[handleIndex];
+
                 if (AddItemToHandle(item, handle))
                 {
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace(
+                            "Add: successfully added {0} {1} to handle {2}",
+                            item.Key,
+                            item.Region,
+                            handle.Configuration.Name);
+                    }
                     result = true;
                 }
                 else
@@ -708,6 +865,15 @@ namespace CacheManager.Core
                     // when we return false...
                     // Note: we might also just have added the item to a cache handel a level below,
                     //       this will get removed, too!
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace(
+                            "Add: {0} {1} to handle {2} FAILED. Evicting items from other handles.",
+                            item.Key,
+                            item.Region,
+                            handle.Configuration.Name);
+                    }
+
                     this.EvictFromOtherHandles(item.Key, item.Region, handleIndex);
                     return false;
                 }
@@ -716,6 +882,24 @@ namespace CacheManager.Core
             // trigger only once and not per handle and only if the item was added!
             if (result)
             {
+                // update backplane
+                if (this.cacheBackplane != null)
+                {
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace("Put: {0} {1}: notifies backplane [change].", item.Key, item.Region);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(item.Region))
+                    {
+                        this.cacheBackplane.NotifyChange(item.Key);
+                    }
+                    else
+                    {
+                        this.cacheBackplane.NotifyChange(item.Key, item.Region);
+                    }
+                }
+
                 this.TriggerOnAdd(item.Key, item.Region);
             }
 
@@ -731,6 +915,12 @@ namespace CacheManager.Core
         {
             NotNull(item, nameof(item));
 
+            this.CheckDisposed();
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Put: {0} {1}.", item.Key, item.Region);
+            }
+
             foreach (var handle in this.cacheHandles)
             {
                 if (handle.Configuration.EnableStatistics)
@@ -745,19 +935,33 @@ namespace CacheManager.Core
                     handle.Stats.OnPut(item, oldItem == null);
                 }
 
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace(
+                        "Put: {0} {1} to handle {2}.",
+                        item.Key,
+                        item.Region,
+                        handle.Configuration.Name);
+                }
+
                 handle.Put(item);
             }
 
-            // update back plate
-            if (this.Configuration.HasBackPlate)
+            // update backplane
+            if (this.cacheBackplane != null)
             {
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace("Put: {0} {1}: notifies backplane [change].", item.Key, item.Region);
+                }
+
                 if (string.IsNullOrWhiteSpace(item.Region))
                 {
-                    this.cacheBackPlate.NotifyChange(item.Key);
+                    this.cacheBackplane.NotifyChange(item.Key);
                 }
                 else
                 {
-                    this.cacheBackPlate.NotifyChange(item.Key, item.Region);
+                    this.cacheBackplane.NotifyChange(item.Key, item.Region);
                 }
             }
 
@@ -778,9 +982,9 @@ namespace CacheManager.Core
                     handle.Dispose();
                 }
 
-                if (this.Configuration.HasBackPlate)
+                if (this.cacheBackplane != null)
                 {
-                    this.cacheBackPlate.Dispose();
+                    this.cacheBackplane.Dispose();
                 }
             }
 
@@ -807,7 +1011,14 @@ namespace CacheManager.Core
         /// </exception>
         protected override CacheItem<TCacheValue> GetCacheItemInternal(string key, string region)
         {
+            this.CheckDisposed();
+
             CacheItem<TCacheValue> cacheItem = null;
+
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Get: {0} {1}.", key, region);
+            }
 
             for (int handleIndex = 0; handleIndex < this.cacheHandles.Length; handleIndex++)
             {
@@ -825,6 +1036,11 @@ namespace CacheManager.Core
 
                 if (cacheItem != null)
                 {
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace("Get: {0} {1}: item found in handle {2}.", key, region, handle.Configuration.Name);
+                    }
+
                     // update last accessed, might be used for custom sliding implementations
                     cacheItem.LastAccessedUtc = DateTime.UtcNow;
 
@@ -836,6 +1052,11 @@ namespace CacheManager.Core
                 }
                 else
                 {
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace("Get: {0} {1}: item NOT found in handle {2}.", key, region, handle.Configuration.Name);
+                    }
+
                     handle.Stats.OnMiss(region);
                 }
             }
@@ -867,7 +1088,14 @@ namespace CacheManager.Core
         /// </exception>
         protected override bool RemoveInternal(string key, string region)
         {
+            this.CheckDisposed();
+
             var result = false;
+
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Remove: {0} {1}.", key, region);
+            }
 
             foreach (var handle in this.cacheHandles)
             {
@@ -883,6 +1111,14 @@ namespace CacheManager.Core
 
                 if (handleResult)
                 {
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace(
+                            "Remove: {0} {1}: removed from handle {2}.",
+                            key,
+                            region,
+                            handle.Configuration.Name);
+                    }
                     result = true;
                     handle.Stats.OnRemove(region);
                 }
@@ -890,16 +1126,21 @@ namespace CacheManager.Core
 
             if (result)
             {
-                // update back plate
-                if (this.Configuration.HasBackPlate)
+                // update backplane
+                if (this.cacheBackplane != null)
                 {
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace("Remove: {0} {1}: notifies backplane [remove].", key, region);
+                    }
+
                     if (string.IsNullOrWhiteSpace(region))
                     {
-                        this.cacheBackPlate.NotifyRemove(key);
+                        this.cacheBackplane.NotifyRemove(key);
                     }
                     else
                     {
-                        this.cacheBackPlate.NotifyRemove(key, region);
+                        this.cacheBackplane.NotifyRemove(key, region);
                     }
                 }
 
@@ -910,22 +1151,36 @@ namespace CacheManager.Core
             return result;
         }
 
-        /// <summary>
-        /// Evicts a cache item from <paramref name="handles"/>.
-        /// </summary>
-        /// <param name="key">The key.</param>
-        /// <param name="region">The region.</param>
-        /// <param name="handles">The handles.</param>
-        private static void EvictFromHandles(string key, string region, BaseCacheHandle<TCacheValue>[] handles)
+        private static bool AddItemToHandle(CacheItem<TCacheValue> item, BaseCacheHandle<TCacheValue> handle)
+        {
+            if (handle.Add(item))
+            {
+                handle.Stats.OnAdd(item);
+                return true;
+            }
+
+            return false;
+        }
+
+        private void EvictFromHandles(string key, string region, BaseCacheHandle<TCacheValue>[] handles)
         {
             foreach (var handle in handles)
             {
-                EvictFromHandle(key, region, handle);
+                this.EvictFromHandle(key, region, handle);
             }
         }
 
-        private static void EvictFromHandle(string key, string region, BaseCacheHandle<TCacheValue> handle)
+        private void EvictFromHandle(string key, string region, BaseCacheHandle<TCacheValue> handle)
         {
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace(
+                    "Evict from handle: {0} {1}: on handle {2}.",
+                    key,
+                    region,
+                    handle.Configuration.Name);
+            }
+
             bool result;
             if (string.IsNullOrWhiteSpace(region))
             {
@@ -942,65 +1197,80 @@ namespace CacheManager.Core
             }
         }
 
-        private static bool AddItemToHandle(CacheItem<TCacheValue> item, BaseCacheHandle<TCacheValue> handle)
+        private TCacheValue AddOrUpdateInternal(CacheItem<TCacheValue> item, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
         {
-            if (handle.Add(item))
+            this.CheckDisposed();
+            if (this.logTrace)
             {
-                handle.Stats.OnAdd(item);
-                return true;
+                this.Logger.LogTrace("Add or update: {0} {1}.", item.Key, item.Region);
             }
 
-            return false;
-        }
-
-        /// <summary>
-        /// Adds or updates an item.
-        /// </summary>
-        /// <param name="item">The item to be added or updated.</param>
-        /// <param name="updateValue">The update value function.</param>
-        /// <param name="config">The configuration for updates.</param>
-        /// <returns>The added or updated value.</returns>
-        private TCacheValue AddOrUpdateInternal(CacheItem<TCacheValue> item, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config)
-        {
             var tries = 0;
             do
             {
                 tries++;
+
+                if (this.AddInternal(item))
+                {
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace("Add or update: {0} {1}: successfully added the item.", item.Key, item.Region);
+                    }
+
+                    return item.Value;
+                }
+
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace(
+                        "Add or update: {0} {1}: add failed, trying to update...",
+                        item.Key,
+                        item.Region);
+                }
+
                 TCacheValue returnValue;
                 bool updated = string.IsNullOrWhiteSpace(item.Region) ?
-                    this.TryUpdate(item.Key, updateValue, config, out returnValue) :
-                    this.TryUpdate(item.Key, item.Region, updateValue, config, out returnValue);
+                    this.TryUpdate(item.Key, updateValue, maxRetries, out returnValue) :
+                    this.TryUpdate(item.Key, item.Region, updateValue, maxRetries, out returnValue);
 
                 if (updated)
                 {
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace("Add or update: {0} {1}: successfully updated.", item.Key, item.Region);
+                    }
+
                     return returnValue;
                 }
-                else
+
+                if (this.logTrace)
                 {
-                    // if the update didn't work, lets try to add it
-                    if (this.AddInternal(item))
-                    {
-                        return item.Value;
-                    }
-                    //// Continue looping otherwise...
-                    //// Add also didn't work, meaning the item is already there/someone added it in
-                    //// the meantime, lets try it again...
+                    this.Logger.LogTrace(
+                        "Add or update: {0} {1}: update FAILED, retrying [{2}/{3}].",
+                        item.Key,
+                        item.Region,
+                        tries,
+                        this.Configuration.MaxRetries);
                 }
             }
-            while (tries <= this.Configuration.MaxRetries);
+            while (tries <= maxRetries);
 
             // exceeded max retries, failing the operation... (should not happen in 99,99% of the cases though, better throw?)
             return default(TCacheValue);
         }
 
-        /// <summary>
-        /// Adds an item to handles depending on the update mode configuration.
-        /// </summary>
-        /// <param name="item">The item to be added.</param>
-        /// <param name="foundIndex">The index of the cache handle the item was found in.</param>
         private void AddToHandles(CacheItem<TCacheValue> item, int foundIndex)
         {
-            switch (this.Configuration.CacheUpdateMode)
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace(
+                    "Add to handles: {0} {1}: with update mode {2}.",
+                    item.Key,
+                    item.Region,
+                    this.Configuration.UpdateMode);
+            }
+
+            switch (this.Configuration.UpdateMode)
             {
                 case CacheUpdateMode.None:
                     // do basically nothing
@@ -1012,6 +1282,11 @@ namespace CacheManager.Core
                     {
                         if (handleIndex != foundIndex)
                         {
+                            if (this.logTrace)
+                            {
+                                this.Logger.LogTrace("Add to handles: {0} {1}: adding to handle {2}.", item.Key, item.Region, handleIndex);
+                            }
+
                             this.cacheHandles[handleIndex].Add(item);
                         }
                     }
@@ -1030,6 +1305,11 @@ namespace CacheManager.Core
                     {
                         if (handleIndex < foundIndex)
                         {
+                            if (this.logTrace)
+                            {
+                                this.Logger.LogTrace("Add to handles: {0} {1}: adding to handle {2}.", item.Key, item.Region, handleIndex);
+                            }
+
                             this.cacheHandles[handleIndex].Add(item);
                         }
                     }
@@ -1045,6 +1325,11 @@ namespace CacheManager.Core
                 return;
             }
 
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Add to handles below: {0} {1}: below handle {2}.", item.Key, item.Region, foundIndex);
+            }
+
             for (int handleIndex = 0; handleIndex < this.cacheHandles.Length; handleIndex++)
             {
                 if (handleIndex > foundIndex)
@@ -1057,10 +1342,6 @@ namespace CacheManager.Core
             }
         }
 
-        /// <summary>
-        /// Clears the cache handles provided.
-        /// </summary>
-        /// <param name="handles">The handles.</param>
         private void ClearHandles(BaseCacheHandle<TCacheValue>[] handles)
         {
             foreach (var handle in handles)
@@ -1072,11 +1353,6 @@ namespace CacheManager.Core
             this.TriggerOnClear();
         }
 
-        /// <summary>
-        /// Invokes ClearRegion on the <paramref name="handles"/>.
-        /// </summary>
-        /// <param name="region">The region.</param>
-        /// <param name="handles">The handles.</param>
         private void ClearRegionHandles(string region, BaseCacheHandle<TCacheValue>[] handles)
         {
             foreach (var handle in handles)
@@ -1088,13 +1364,6 @@ namespace CacheManager.Core
             this.TriggerOnClearRegion(region);
         }
 
-        /// <summary>
-        /// Evicts a cache item from all cache handles except the one at <paramref name="excludeIndex"/>.
-        /// </summary>
-        /// <param name="key">The key.</param>
-        /// <param name="region">The region.</param>
-        /// <param name="excludeIndex">Index of the exclude.</param>
-        /// <exception cref="System.ArgumentOutOfRangeException">If excludeIndex is not valid.</exception>
         private void EvictFromOtherHandles(string key, string region, int excludeIndex)
         {
             if (excludeIndex < 0 || excludeIndex >= this.cacheHandles.Length)
@@ -1102,17 +1371,27 @@ namespace CacheManager.Core
                 throw new ArgumentOutOfRangeException(nameof(excludeIndex));
             }
 
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Evict from other handles: {0} {1}: excluding handle {2}.", key, region, excludeIndex);
+            }
+
             for (int handleIndex = 0; handleIndex < this.cacheHandles.Length; handleIndex++)
             {
                 if (handleIndex != excludeIndex)
                 {
-                    EvictFromHandle(key, region, this.cacheHandles[handleIndex]);
+                    this.EvictFromHandle(key, region, this.cacheHandles[handleIndex]);
                 }
             }
         }
 
         private void EvictFromHandlesAbove(string key, string region, int excludeIndex)
         {
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Evict from handles above: {0} {1}: above handle {2}.", key, region, excludeIndex);
+            }
+
             if (excludeIndex < 0 || excludeIndex >= this.cacheHandles.Length)
             {
                 throw new ArgumentOutOfRangeException(nameof(excludeIndex));
@@ -1122,33 +1401,51 @@ namespace CacheManager.Core
             {
                 if (handleIndex < excludeIndex)
                 {
-                    EvictFromHandle(key, region, this.cacheHandles[handleIndex]);
+                    this.EvictFromHandle(key, region, this.cacheHandles[handleIndex]);
                 }
             }
         }
 
-        /// <summary>
-        /// Sets the cache back plate and subscribes to it.
-        /// </summary>
-        /// <param name="backPlate">The back plate.</param>
-        /// <exception cref="System.ArgumentNullException">
-        /// If <paramref name="backPlate"/> is null.
-        /// </exception>
-        private void RegisterCacheBackPlate(CacheBackPlate backPlate)
+        private TCacheValue GetOrAddInternal(string key, string region, Func<string, string, TCacheValue> valueFactory)
         {
-            NotNull(backPlate, nameof(backPlate));
+            var tries = 0;
+            do
+            {
+                tries++;
+                var item = this.GetCacheItemInternal(key, region);
+                if (item != null)
+                {
+                    return item.Value;
+                }
 
-            this.cacheBackPlate = backPlate;
+                var newValue = valueFactory(key, region);
+                item = string.IsNullOrWhiteSpace(region) ? new CacheItem<TCacheValue>(key, newValue) : new CacheItem<TCacheValue>(key, region, newValue);
+                if (this.AddInternal(item))
+                {
+                    return newValue;
+                }
+            }
+            while (tries <= this.Configuration.MaxRetries);
 
-            // TODO: better throw? Or at least log warn
-            if (this.cacheHandles.Any(p => p.Configuration.IsBackPlateSource))
+            // should usually never occur, but could if e.g. max retries is 1 and an item gets added between the get and add.
+            // pretty unusual, so keep the max tries at least around 50
+            throw new InvalidOperationException(
+                string.Format("Could not get nor add the item {0} {1}", key, region));
+        }
+
+        private void RegisterCacheBackplane(CacheBackplane backplane)
+        {
+            NotNull(backplane, nameof(backplane));
+
+            // this should have been checked during activation already, just to be totally sure...
+            if (this.cacheHandles.Any(p => p.Configuration.IsBackplaneSource))
             {
                 var handles = new Func<BaseCacheHandle<TCacheValue>[]>(() =>
                 {
                     var handleList = new List<BaseCacheHandle<TCacheValue>>();
                     foreach (var handle in this.cacheHandles)
                     {
-                        if (!handle.Configuration.IsBackPlateSource)
+                        if (!handle.Configuration.IsBackplaneSource)
                         {
                             handleList.Add(handle);
                         }
@@ -1156,173 +1453,105 @@ namespace CacheManager.Core
                     return handleList.ToArray();
                 });
 
-                backPlate.SubscribeChanged((key) =>
+                backplane.Changed += (sender, args) =>
                 {
-                    EvictFromHandles(key, null, handles());
-                });
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace("Backplane event: [Changed] of {0} {1}.", args.Key, args.Region);
+                    }
 
-                backPlate.SubscribeChanged((key, region) =>
-                {
-                    EvictFromHandles(key, region, handles());
-                });
+                    this.EvictFromHandles(args.Key, args.Region, handles());
+                };
 
-                backPlate.SubscribeRemove((key) =>
+                backplane.Removed += (sender, args) =>
                 {
-                    EvictFromHandles(key, null, handles());
-                    this.TriggerOnRemove(key, null);
-                });
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace("Backplane event: [Remove] of {0} {1}.", args.Key, args.Region);
+                    }
 
-                backPlate.SubscribeRemove((key, region) =>
-                {
-                    EvictFromHandles(key, region, handles());
-                    this.TriggerOnRemove(key, region);
-                });
+                    this.EvictFromHandles(args.Key, args.Region, handles());
+                    this.TriggerOnRemove(args.Key, args.Region);
+                };
 
-                backPlate.SubscribeClear(() =>
+                backplane.Cleared += (sender, args) =>
                 {
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace("Backplane event: [Clear].");
+                    }
+
                     this.ClearHandles(handles());
                     this.TriggerOnClear();
-                });
+                };
 
-                backPlate.SubscribeClearRegion((region) =>
+                backplane.ClearedRegion += (sender, args) =>
                 {
-                    this.ClearRegionHandles(region, handles());
-                    this.TriggerOnClearRegion(region);
-                });
+                    if (this.logTrace)
+                    {
+                        this.Logger.LogTrace("Backplane event: [Clear Region] region: {0}.", args.Region);
+                    }
+
+                    this.ClearRegionHandles(args.Region, handles());
+                    this.TriggerOnClearRegion(args.Region);
+                };
             }
         }
 
-        /// <summary>
-        /// Triggers OnAdd.
-        /// </summary>
-        /// <param name="key">The key.</param>
-        /// <param name="region">The region.</param>
         private void TriggerOnAdd(string key, string region)
         {
-            if (this.OnAdd != null)
-            {
-                this.OnAdd(this, new CacheActionEventArgs(key, region));
-            }
+            this.OnAdd?.Invoke(this, new CacheActionEventArgs(key, region));
         }
 
-        /// <summary>
-        /// Triggers OnClear.
-        /// </summary>
         private void TriggerOnClear()
         {
-            if (this.OnClear != null)
-            {
-                this.OnClear(this, new CacheClearEventArgs());
-            }
+            this.OnClear?.Invoke(this, new CacheClearEventArgs());
         }
 
-        /// <summary>
-        /// Triggers OnClearRegion.
-        /// </summary>
-        /// <param name="region">The region.</param>
         private void TriggerOnClearRegion(string region)
         {
-            if (this.OnClearRegion != null)
-            {
-                this.OnClearRegion(this, new CacheClearRegionEventArgs(region));
-            }
+            this.OnClearRegion?.Invoke(this, new CacheClearRegionEventArgs(region));
         }
 
-        /// <summary>
-        /// Triggers OnGet.
-        /// </summary>
-        /// <param name="key">The key.</param>
-        /// <param name="region">The region.</param>
         private void TriggerOnGet(string key, string region)
         {
-            if (this.OnGet != null)
-            {
-                this.OnGet(this, new CacheActionEventArgs(key, region));
-            }
+            this.OnGet?.Invoke(this, new CacheActionEventArgs(key, region));
         }
 
-        /// <summary>
-        /// Triggers TriggerOnPut.
-        /// </summary>
-        /// <param name="key">The key.</param>
-        /// <param name="region">The region.</param>
         private void TriggerOnPut(string key, string region)
         {
-            if (this.OnPut != null)
-            {
-                this.OnPut(this, new CacheActionEventArgs(key, region));
-            }
+            this.OnPut?.Invoke(this, new CacheActionEventArgs(key, region));
         }
 
-        /// <summary>
-        /// Triggers TriggerOnRemove.
-        /// </summary>
-        /// <param name="key">The key.</param>
-        /// <param name="region">The region.</param>
-        /// <exception cref="System.ArgumentNullException">If key is null.</exception>
         private void TriggerOnRemove(string key, string region)
         {
             NotNullOrWhiteSpace(key, nameof(key));
-
-            if (this.OnRemove != null)
-            {
-                this.OnRemove(this, new CacheActionEventArgs(key, region));
-            }
+            this.OnRemove?.Invoke(this, new CacheActionEventArgs(key, region));
         }
 
-        /// <summary>
-        /// Triggers OnUpdate.
-        /// </summary>
-        /// <param name="key">The key.</param>
-        /// <param name="region">The region.</param>
-        /// <param name="config">The configuration.</param>
-        /// <param name="result">The result.</param>
-        private void TriggerOnUpdate(string key, string region, UpdateItemConfig config, UpdateItemResult<TCacheValue> result)
+        private void TriggerOnUpdate(string key, string region, int maxRetries, UpdateItemResult<TCacheValue> result)
         {
-            if (this.OnUpdate != null)
-            {
-                this.OnUpdate(this, new CacheUpdateEventArgs<TCacheValue>(key, region, config, result));
-            }
+            this.OnUpdate?.Invoke(this, new CacheUpdateEventArgs<TCacheValue>(key, region, maxRetries, result));
         }
 
-        /// <summary>
-        /// Private implementation of Update.
-        /// </summary>
-        /// <param name="handles">The handles.</param>
-        /// <param name="key">The key.</param>
-        /// <param name="updateValue">The update value.</param>
-        /// <param name="config">The configuration.</param>
-        /// <param name="value">The value.</param>
-        /// <returns><c>True</c> if the item has been updated.</returns>
         private bool UpdateInternal(
             BaseCacheHandle<TCacheValue>[] handles,
             string key,
             Func<TCacheValue, TCacheValue> updateValue,
-            UpdateItemConfig config,
+            int maxRetries,
             out TCacheValue value) =>
-            this.UpdateInternal(handles, key, null, updateValue, config, out value);
+            this.UpdateInternal(handles, key, null, updateValue, maxRetries, out value);
 
-        /// <summary>
-        /// Private implementation of Update.
-        /// <para>
-        /// Change: 6/6/15: inverted the handle loop so that the lowest gets updated first,
-        /// Otherwise, it could happen that an in memory cache has the item and updates it, but the
-        /// second handle doesn't have it Still, overall result would be true, but if the second
-        /// handle is the back plate, the item would get flushed. If the item was updated
-        /// successfully, If the manager is configured with CacheUpdateMode.None, we'll proceed,
-        /// otherwise (up, or All), we'll flush all handles above the current one; the next get will
-        /// add the items back.
-        /// </para>
-        /// </summary>
-        /// <param name="handles">The handles.</param>
-        /// <param name="key">The key.</param>
-        /// <param name="region">The region.</param>
-        /// <param name="updateValue">The update value.</param>
-        /// <param name="config">The configuration.</param>
-        /// <param name="value">The value.</param>
-        /// <returns><c>True</c> if the item has been updated.</returns>
-        private bool UpdateInternal(BaseCacheHandle<TCacheValue>[] handles, string key, string region, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config, out TCacheValue value)
+        private bool UpdateInternal(
+            BaseCacheHandle<TCacheValue>[] handles,
+            string key,
+            string region,
+            Func<TCacheValue, TCacheValue> updateValue,
+            int maxRetries,
+            out TCacheValue value)
         {
+            this.CheckDisposed();
+
             UpdateItemResultState overallResult = UpdateItemResultState.Success;
             bool overallVersionConflictOccurred = false;
             int overallTries = 1;
@@ -1335,14 +1564,29 @@ namespace CacheManager.Core
                 return false;
             }
 
+            if (this.logTrace)
+            {
+                this.Logger.LogTrace("Update: {0} {1}.", key, region);
+            }
+
             // lowest level goes first...
             for (int handleIndex = handles.Length - 1; handleIndex >= 0; handleIndex--)
             {
                 var handle = handles[handleIndex];
 
                 UpdateItemResult<TCacheValue> result = string.IsNullOrWhiteSpace(region) ?
-                    handle.Update(key, updateValue, config) :
-                    handle.Update(key, region, updateValue, config);
+                    handle.Update(key, updateValue, maxRetries) :
+                    handle.Update(key, region, updateValue, maxRetries);
+
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace(
+                        "Update: {0} {1}: tried on handle {2}: result: {3}.",
+                        key,
+                        region,
+                        handle.Configuration.Name,
+                        result.UpdateState);
+                }
 
                 if (result.VersionConflictOccurred)
                 {
@@ -1368,92 +1612,59 @@ namespace CacheManager.Core
                     this.AddToHandlesBelow(item, handleIndex);
                     break;
                 }
-                else if (result.UpdateState != UpdateItemResultState.ItemDidNotExist)
+                else if (result.UpdateState == UpdateItemResultState.TooManyRetries)
                 {
-                    // only if the item does not exist in the current handle, we procceed the
-                    // loop... otherwise, we had too many retries... this basically indicates an
-                    // invalide state of the cache: The item is there, but we couldn't update it and
+                    // if we had too many retries, this basically indicates an
+                    // invalid state of the cache: The item is there, but we couldn't update it and
                     // it most likely has a different version
-                    // TODO: logging
+                    this.Logger.LogWarn(
+                        "Update: {0} {1}: on handle {2} failed with too many retries! Evicting from other handles.",
+                        key,
+                        region,
+                        handleIndex);
+
                     this.EvictFromOtherHandles(key, region, handleIndex);
                     break;
                 }
+                else if (result.UpdateState == UpdateItemResultState.ItemDidNotExist &&
+                    (handle.Configuration.IsBackplaneSource || handleIndex == handles.Length - 1))
+                {
+                    // If update fails because item doesn't exist AND the current handle is backplane source or the lowest cache handle level,
+                    // remove the item from other handles (if exists).
+                    // Otherwise, if we do not exit here, calling update on the next handle might succeed and would return a misleading result.
+                    this.Logger.LogWarn(
+                        "Update: {0} {1}: on handle {2} failed because item did not exist.",
+                        key,
+                        region,
+                        handleIndex);
 
-                // TODO: revist this, but I think the version conflict handling was a mistake and leeds to errors. Default
-                // was evict other handles, anyways, what we now always do
-                //// if (result.VersionConflictOccurred && config.VersionConflictOperation != VersionConflictHandling.Ignore)
-                //// {
-                ////    switch (config.VersionConflictOperation)
-                ////    {
-                ////        // default behavior
-                ////        case VersionConflictHandling.EvictItemFromOtherCaches:
-                ////            this.EvictFromOtherHandles(key, region, handleIndex);
-                ////            break;
-
-                ////        // update other caches could potentially leed to inconsitency because we only use Put to update the handles...
-                ////        case VersionConflictHandling.UpdateOtherCaches:
-                ////            CacheItem<TCacheValue> item;
-                ////            if (string.IsNullOrWhiteSpace(region))
-                ////            {
-                ////                item = handle.GetCacheItem(key);
-                ////            }
-                ////            else
-                ////            {
-                ////                item = handle.GetCacheItem(key, region);
-                ////            }
-
-                ////            this.UpdateOtherHandles(item, handleIndex);
-                ////            break;
-                ////    }
-
-                ////    // stop loop because we already handled everything.
-                ////    break;
-                //// }
+                    this.EvictFromOtherHandles(key, region, handleIndex);
+                    break;
+                }
             }
 
-            // update back plate
-            if (overallResult == UpdateItemResultState.Success && this.Configuration.HasBackPlate)
+            // update backplane
+            if (overallResult == UpdateItemResultState.Success && this.cacheBackplane != null)
             {
+                if (this.logTrace)
+                {
+                    this.Logger.LogTrace("Update: {0} {1}: notifies backplane [change].", key, region);
+                }
+
                 if (string.IsNullOrWhiteSpace(region))
                 {
-                    this.cacheBackPlate.NotifyChange(key);
+                    this.cacheBackplane.NotifyChange(key);
                 }
                 else
                 {
-                    this.cacheBackPlate.NotifyChange(key, region);
+                    this.cacheBackplane.NotifyChange(key, region);
                 }
             }
 
             // trigger update event with the overall results
-            this.TriggerOnUpdate(key, region, config, new UpdateItemResult<TCacheValue>(value, overallResult, overallVersionConflictOccurred, overallTries));
+            this.TriggerOnUpdate(key, region, maxRetries, new UpdateItemResult<TCacheValue>(value, overallResult, overallVersionConflictOccurred, overallTries));
 
             return overallResult == UpdateItemResultState.Success;
-        }
-
-        /// <summary>
-        /// Updates all cache handles except the one at <paramref name="excludeIndex"/>.
-        /// </summary>
-        /// <param name="item">The item.</param>
-        /// <param name="excludeIndex">Index of the exclude.</param>
-        private void UpdateOtherHandles(CacheItem<TCacheValue> item, int excludeIndex)
-        {
-            if (item == null)
-            {
-                return;
-            }
-
-            // .Where(p => p.Key != excludeIndex).Select(p => p.Value)
-            for (int handleIndex = 0; handleIndex < this.cacheHandles.Length; handleIndex++)
-            {
-                if (handleIndex != excludeIndex)
-                {
-                    this.cacheHandles[handleIndex].Put(item);
-                    //// handle.Stats.OnPut(item); don't update,
-                    //// we expect the item to be in the cache already at this point, so we should not increase the count...
-
-                    this.TriggerOnPut(item.Key, item.Region);
-                }
-            }
         }
     }
 }

@@ -80,8 +80,11 @@
     <Compile Include="..\CacheManager.Core\ICacheManager.cs">
       <Link>ICacheManager.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.Core\Internal\BackPlateMessage.cs">
-      <Link>Internal\BackPlateMessage.cs</Link>
+    <Compile Include="..\CacheManager.Core\ICacheManagerConfiguration.cs">
+      <Link>ICacheManagerConfiguration.cs</Link>
+    </Compile>
+    <Compile Include="..\CacheManager.Core\Internal\BackplaneMessage.cs">
+      <Link>Internal\BackplaneMessage.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.Core\Internal\BaseCache.cs">
       <Link>Internal\BaseCache.cs</Link>
@@ -92,8 +95,8 @@
     <Compile Include="..\CacheManager.Core\Internal\BinaryCacheSerializer.cs">
       <Link>Internal\BinaryCacheSerializer.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.Core\Internal\CacheBackPlate.cs">
-      <Link>Internal\CacheBackPlate.cs</Link>
+    <Compile Include="..\CacheManager.Core\Internal\CacheBackplane.cs">
+      <Link>Internal\CacheBackplane.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.Core\Internal\CacheEventArgs.cs">
       <Link>Internal\CacheEventArgs.cs</Link>
@@ -116,14 +119,23 @@
     <Compile Include="..\CacheManager.Core\Internal\CacheStatsCounterType.cs">
       <Link>Internal\CacheStatsCounterType.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.Core\Internal\DictionaryCacheHandle`1.cs">
-      <Link>Internal\DictionaryCacheHandle`1.cs</Link>
+    <Compile Include="..\CacheManager.Core\Internal\DictionaryCacheHandle.cs">
+      <Link>Internal\DictionaryCacheHandle.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.Core\Internal\ICacheValueSerializer.cs">
       <Link>Internal\ICacheValueSerializer.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.Core\UpdateItemConfig.cs">
-      <Link>UpdateItemConfig.cs</Link>
+    <Compile Include="..\cachemanager.core\logging\ILogger.cs">
+      <Link>Logging\ILogger.cs</Link>
+    </Compile>
+    <Compile Include="..\cachemanager.core\logging\ILoggerFactory.cs">
+      <Link>Logging\ILoggerFactory.cs</Link>
+    </Compile>
+    <Compile Include="..\cachemanager.core\logging\LoggerExtensions.cs">
+      <Link>Logging\LoggerExtensions.cs</Link>
+    </Compile>
+    <Compile Include="..\cachemanager.core\logging\LogLevel.cs">
+      <Link>Logging\LogLevel.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.Core\UpdateItemResult.cs">
       <Link>UpdateItemResult.cs</Link>
@@ -132,6 +144,11 @@
       <Link>Utility\Guard.cs</Link>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <CodeAnalysisDictionary Include="..\..\common\CustomDictionary.xml">
+      <Link>CustomDictionary.xml</Link>
+    </CodeAnalysisDictionary>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

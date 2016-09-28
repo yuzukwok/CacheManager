@@ -50,9 +50,10 @@ namespace CacheManager.Serialization.Json
         public JsonSerializerSettings SerializationSettings { get; }
 
         /// <inheritdoc/>
-        public object Deserialize(byte[] data, Type target)
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1062:Validate arguments of public methods", MessageId = "0", Justification = "Is checked by GetString")]
+        public virtual object Deserialize(byte[] data, Type target)
         {
-            var stringValue = Encoding.UTF8.GetString(data);
+            var stringValue = Encoding.UTF8.GetString(data, 0, data.Length);
             return JsonConvert.DeserializeObject(stringValue, target, this.DeserializationSettings);
         }
 
@@ -68,7 +69,7 @@ namespace CacheManager.Serialization.Json
         }
 
         /// <inheritdoc/>
-        public byte[] Serialize<T>(T value)
+        public virtual byte[] Serialize<T>(T value)
         {
             var stringValue = JsonConvert.SerializeObject(value, this.SerializationSettings);
             return Encoding.UTF8.GetBytes(stringValue);

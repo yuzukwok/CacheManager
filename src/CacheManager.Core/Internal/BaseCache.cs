@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Globalization;
 using System.Reflection;
+using CacheManager.Core.Logging;
 using static CacheManager.Core.Utility.Guard;
 
 namespace CacheManager.Core.Internal
@@ -30,6 +31,12 @@ namespace CacheManager.Core.Internal
         {
             this.Dispose(false);
         }
+
+        /// <summary>
+        /// Gets the logger.
+        /// </summary>
+        /// <value>The logger instance.</value>
+        protected abstract ILogger Logger { get; }
 
         /// <summary>
         /// Gets or sets a value indicating whether this <see cref="BaseCache{TCacheValue}"/> is disposed.
@@ -576,6 +583,18 @@ namespace CacheManager.Core.Internal
         protected abstract bool RemoveInternal(string key, string region);
 
         /// <summary>
+        /// Checks if the instance is disposed.
+        /// </summary>
+        /// <exception cref="ObjectDisposedException">If the instance is disposed.</exception>
+        protected void CheckDisposed()
+        {
+            if (this.Disposed)
+            {
+                throw new ObjectDisposedException(this.GetType().Name);
+            }
+        }
+
+        /// <summary>
         /// Casts the value to <c>TOut</c>.
         /// </summary>
         /// <typeparam name="TOut">The type.</typeparam>
@@ -590,10 +609,10 @@ namespace CacheManager.Core.Internal
 
 #if NET40
             var info = typeof(TOut);
-            if (info.IsClass)
+            if (info.IsClass || info.IsInterface)
 #else
             var info = typeof(TOut).GetTypeInfo();
-            if (info.IsClass)
+            if (info.IsClass || info.IsInterface)
 #endif
             {
                 return (TOut)value;

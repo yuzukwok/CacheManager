@@ -56,8 +56,8 @@
     <Compile Include="..\..\common\GlobalAssemblyInfo.cs">
       <Link>Properties\GlobalAssemblyInfo.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.Serialization.Json\ConfigurationBuilderExtensions.cs">
-      <Link>ConfigurationBuilderExtensions.cs</Link>
+    <Compile Include="..\CacheManager.Serialization.Json\GzJsonCacheSerializer.cs">
+      <Link>GzJsonCacheSerializer.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.Serialization.Json\JsonCacheItem.cs">
       <Link>JsonCacheItem.cs</Link>
@@ -65,21 +65,24 @@
     <Compile Include="..\CacheManager.Serialization.Json\JsonCacheSerializer.cs">
       <Link>JsonCacheSerializer.cs</Link>
     </Compile>
+    <Compile Include="..\CacheManager.Serialization.Json\JsonConfigurationBuilderExtensions.cs">
+      <Link>JsonConfigurationBuilderExtensions.cs</Link>
+    </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\Newtonsoft.Json.dll" />
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\StyleCop.Analyzers.CodeFixes.dll" />
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\StyleCop.Analyzers.dll" />
-  </ItemGroup>
-  <ItemGroup>
     <ProjectReference Include="..\CacheManager.Core.Net40\CacheManager.Core.Net40.csproj">
       <Project>{997bfd2d-1fa6-43a9-ab39-3040ed69397f}</Project>
       <Name>CacheManager.Core.Net40</Name>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <CodeAnalysisDictionary Include="..\..\common\CustomDictionary.xml">
+      <Link>CustomDictionary.xml</Link>
+    </CodeAnalysisDictionary>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

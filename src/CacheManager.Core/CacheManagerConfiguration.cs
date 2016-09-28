@@ -1,132 +1,123 @@
 ﻿using System;
 using System.Collections.Generic;
-using CacheManager.Core.Internal;
-using static CacheManager.Core.Utility.Guard;
 
 namespace CacheManager.Core
 {
     /// <summary>
     /// The basic cache manager configuration class.
     /// </summary>
-    public sealed class CacheManagerConfiguration
+    public class CacheManagerConfiguration : ICacheManagerConfiguration
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="CacheManagerConfiguration"/> class.
         /// </summary>
         public CacheManagerConfiguration()
         {
-#if !PORTABLE && !DOTNET5_2
-            // default to binary serialization if available
-            this.CacheSerializer = new BinaryCacheSerializer();
-#endif
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="CacheManagerConfiguration"/> class.
+        /// Gets a <see cref="ConfigurationBuilder"/> for the current <see cref="CacheManagerConfiguration"/> instance
+        /// to manipulate the configuration fluently.
         /// </summary>
-        /// <param name="maxRetries">The maximum retries.</param>
-        /// <param name="retryTimeout">The retry timeout.</param>
-        /// <param name="mode">The cache update mode.</param>
-        /// <param name="backPlateName">The name of the cache back plate.</param>
-        /// <param name="backPlateType">The type of the cache back plate implementation.</param>
-        /// <param name="serializer">The serializer to be used to serialize the cache item.</param>
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1026:DefaultParametersShouldNotBeUsed", Justification = "We use it for configuration only.")]
-        public CacheManagerConfiguration(
-            CacheUpdateMode mode = CacheUpdateMode.None,
-            int maxRetries = int.MaxValue,
-            int retryTimeout = 10,
-            Type backPlateType = null,
-            string backPlateName = null,
-            ICacheSerializer serializer = null)
-            : this()
-        {
-            this.CacheUpdateMode = mode;
-            this.MaxRetries = maxRetries;
-            this.RetryTimeout = retryTimeout;
-            this.BackPlateType = backPlateType;
-            this.BackPlateName = backPlateName;
-#if !PORTABLE && !DOTNET5_2
-            // default to binary serialization if available
-            this.CacheSerializer = serializer ?? new BinaryCacheSerializer();
-#else
-            this.CacheSerializer = serializer;
-#endif
-        }
+        /// <returns>The <see cref="ConfigurationBuilder"/>.</returns>
+        public ConfigurationBuilder Builder => new ConfigurationBuilder(this);
 
         /// <summary>
-        /// Gets the serializer which should be used to serialize the cache item's value.
+        /// Gets or sets the name of the cache.
         /// </summary>
-        /// <value>The serializer.</value>
-        public ICacheSerializer CacheSerializer { get; private set; }
+        /// <value>The name of the cache.</value>
+        public string Name { get; set; } = Guid.NewGuid().ToString();
 
         /// <summary>
-        /// Gets or sets the <see cref="CacheUpdateMode"/> for the cache manager instance.
+        /// Gets or sets the <see cref="UpdateMode"/> for the cache manager instance.
         /// <para>
         /// Drives the behavior of the cache manager how it should update the different cache
         /// handles it manages.
         /// </para>
         /// </summary>
         /// <value>The cache update mode.</value>
-        /// <see cref="CacheUpdateMode"/>
-        public CacheUpdateMode CacheUpdateMode { get; set; } = CacheUpdateMode.Up;
+        /// <see cref="UpdateMode"/>
+        public CacheUpdateMode UpdateMode { get; set; } = CacheUpdateMode.Up;
 
         /// <summary>
         /// Gets or sets the limit of the number of retry operations per action.
-        /// <para>Default is <see cref="int.MaxValue"/>.</para>
+        /// <para>Default is 50.</para>
         /// </summary>
         /// <value>The maximum retries.</value>
-        public int MaxRetries { get; set; } = int.MaxValue;
+        public int MaxRetries { get; set; } = 50;
 
         /// <summary>
         /// Gets or sets the number of milliseconds the cache should wait before it will retry an action.
-        /// <para>Default is 10.</para>
+        /// <para>Default is 100.</para>
         /// </summary>
         /// <value>The retry timeout.</value>
-        public int RetryTimeout { get; set; } = 10;
+        public int RetryTimeout { get; set; } = 100;
 
         /// <summary>
-        /// Gets the name of the back plate.
+        /// Gets or sets the configuration key the backplane might use.
         /// </summary>
-        /// <value>The name of the back plate.</value>
-        public string BackPlateName { get; private set; }
+        /// <value>The key of the backplane configuration.</value>
+        public string BackplaneConfigurationKey { get; set; }
 
         /// <summary>
-        /// Gets the type of the back plate.
+        /// Gets or sets the backplane channel name.
         /// </summary>
-        /// <value>The type of the back plate.</value>
-        public Type BackPlateType { get; private set; }
+        /// <value>The channel name.</value>
+        public string BackplaneChannelName { get; set; }
 
         /// <summary>
-        /// Gets a value indicating whether this instance has a back plate defined.
+        /// Gets a value indicating whether this instance has a backplane defined.
         /// </summary>
         /// <value>
-        /// <c>true</c> if this instance has cache back plate; otherwise, <c>false</c>.
+        /// <c>true</c> if this instance has cache backplane; otherwise, <c>false</c>.
         /// </value>
-        public bool HasBackPlate => this.BackPlateType != null;
+        public bool HasBackplane => this.BackplaneType != null;
+
+        /// <summary>
+        /// Gets or sets the factory method for a cache backplane.
+        /// </summary>
+        /// <value>The backplane activator.</value>
+        public Type BackplaneType { get; set; }
+
+        /// <summary>
+        /// Gets or sets additional arguments which should be used instantiating the backplane.
+        /// </summary>
+        /// <value>The list of arguments.</value>
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Performance", "CA1819:PropertiesShouldNotReturnArrays", Justification = "nope")]
+        public object[] BackplaneTypeArguments { get; set; }
+
+        /// <summary>
+        /// Gets or sets the factory method for a cache serializer.
+        /// </summary>
+        /// <value>The serializer activator.</value>
+        public Type SerializerType { get; set; }
+
+        /// <summary>
+        /// Gets or sets additional arguments which should be used instantiating the serializer.
+        /// </summary>
+        /// <value>The list of arguments.</value>
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Performance", "CA1819:PropertiesShouldNotReturnArrays", Justification = "nope")]
+        public object[] SerializerTypeArguments { get; set; }
+
+        /// <summary>
+        /// Gets or sets the factory method for a logger factory.
+        /// </summary>
+        /// <value>
+        /// The logger factory activator.
+        /// </value>
+        public Type LoggerFactoryType { get; set; }
+
+        /// <summary>
+        /// Gets or sets additional arguments which should be used instantiating the logger factory.
+        /// </summary>
+        /// <value>The list of arguments.</value>
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Performance", "CA1819:PropertiesShouldNotReturnArrays", Justification = "nope")]
+        public object[] LoggerFactoryTypeArguments { get; set; }
 
         /// <summary>
         /// Gets the list of cache handle configurations.
-        /// <para>Internally used only.</para>
         /// </summary>
-        /// <value>
-        /// The cache handle configurations.
-        /// </value>
-        internal IList<CacheHandleConfiguration> CacheHandleConfigurations { get; } = new List<CacheHandleConfiguration>();
-
-        internal void WithBackPlate(Type backPlateType, string backPlateName)
-        {
-            NotNull(backPlateType, nameof(backPlateType));
-            NotNullOrWhiteSpace(backPlateName, nameof(backPlateName));
-
-            this.BackPlateName = backPlateName;
-            this.BackPlateType = backPlateType;
-        }
-
-        internal void WithSerializer(ICacheSerializer instance)
-        {
-            NotNull(instance, nameof(instance));
-
-            this.CacheSerializer = instance;
-        }
+        /// <value>The list of cache handle configurations.</value>
+        public IList<CacheHandleConfiguration> CacheHandleConfigurations { get; } = new List<CacheHandleConfiguration>();
     }
 }

@@ -1,4 +1,5 @@
 ﻿using System;
+using CacheManager.Core.Logging;
 using static CacheManager.Core.Utility.Guard;
 
 namespace CacheManager.Core.Internal
@@ -12,30 +13,28 @@ namespace CacheManager.Core.Internal
     /// <typeparam name="TCacheValue">The type of the cache value.</typeparam>
     public abstract class BaseCacheHandle<TCacheValue> : BaseCache<TCacheValue>, IDisposable
     {
+        private readonly object updateLock = new object();
+
         /// <summary>
         /// Initializes a new instance of the <see cref="BaseCacheHandle{TCacheValue}"/> class.
         /// </summary>
-        /// <param name="manager">The manager.</param>
+        /// <param name="managerConfiguration">The manager's configuration.</param>
         /// <param name="configuration">The configuration.</param>
         /// <exception cref="System.ArgumentNullException">
-        /// If configuration or manager are null.
+        /// If <paramref name="managerConfiguration"/> or <paramref name="configuration"/> are null.
         /// </exception>
-        /// <exception cref="System.ArgumentException">If configuration name is empty.</exception>
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA2214:DoNotCallOverridableMethodsInConstructors", Justification = "Configuration must be virtual for some unit tests only. Should never be set by users.")]
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "Not in this case.")]
-        protected BaseCacheHandle(ICacheManager<TCacheValue> manager, CacheHandleConfiguration configuration)
+        /// <exception cref="System.ArgumentException">If <paramref name="configuration"/> name is empty.</exception>
+        protected BaseCacheHandle(CacheManagerConfiguration managerConfiguration, CacheHandleConfiguration configuration)
         {
             NotNull(configuration, nameof(configuration));
-            NotNull(manager, nameof(manager));
-            NotNullOrWhiteSpace(configuration.HandleName, nameof(configuration.HandleName));
+            NotNull(managerConfiguration, nameof(managerConfiguration));
+            NotNullOrWhiteSpace(configuration.Name, nameof(configuration.Name));
 
             this.Configuration = configuration;
 
-            this.Manager = manager;
-
             this.Stats = new CacheStats<TCacheValue>(
-                manager.Name,
-                this.Configuration.HandleName,
+                managerConfiguration.Name,
+                this.Configuration.Name,
                 this.Configuration.EnableStatistics,
                 this.Configuration.EnablePerformanceCounters);
         }
@@ -44,19 +43,13 @@ namespace CacheManager.Core.Internal
         /// Gets the cache handle configuration.
         /// </summary>
         /// <value>The configuration.</value>
-        public virtual CacheHandleConfiguration Configuration { get; }
+        public CacheHandleConfiguration Configuration { get; }
 
         /// <summary>
         /// Gets the number of items the cache handle currently maintains.
         /// </summary>
         /// <value>The count.</value>
         public abstract int Count { get; }
-
-        /// <summary>
-        /// Gets the cache manager the cache handle was added to.
-        /// </summary>
-        /// <value>The manager.</value>
-        public virtual ICacheManager<TCacheValue> Manager { get; }
 
         /// <summary>
         /// Gets the cache stats object.
@@ -73,7 +66,14 @@ namespace CacheManager.Core.Internal
         /// <param name="timeout">The expiration timeout.</param>
         public override void Expire(string key, ExpirationMode mode, TimeSpan timeout)
         {
+            this.CheckDisposed();
             var item = this.GetCacheItem(key);
+            if (item == null)
+            {
+                this.Logger.LogTrace("Expire: item not found for key {0}", key);
+                return;
+            }
+
             this.PutInternalPrepared(item.WithExpiration(mode, timeout));
         }
 
@@ -87,7 +87,14 @@ namespace CacheManager.Core.Internal
         /// <param name="timeout">The expiration timeout.</param>
         public override void Expire(string key, string region, ExpirationMode mode, TimeSpan timeout)
         {
+            this.CheckDisposed();
             var item = this.GetCacheItem(key, region);
+            if (item == null)
+            {
+                this.Logger.LogTrace("Expire: item not found for key {0}:{1}", key, region);
+                return;
+            }
+
             this.PutInternalPrepared(item.WithExpiration(mode, timeout));
         }
 
@@ -108,28 +115,34 @@ namespace CacheManager.Core.Internal
         /// </summary>
         /// <param name="key">The key to update.</param>
         /// <param name="updateValue">The function to perform the update.</param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
+        /// <param name="maxRetries">The number of tries.</param>
         /// <returns>The update result which is interpreted by the cache manager.</returns>
         /// <exception cref="System.ArgumentNullException">
-        /// If key, updateValue or config are null.
+        /// If <paramref name="key"/> or <paramref name="updateValue"/> is null.
         /// </exception>
         /// <remarks>
         /// If the cache does not use a distributed cache system. Update is doing exactly the same
         /// as Get plus Put.
         /// </remarks>
-        public virtual UpdateItemResult<TCacheValue> Update(string key, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config)
+        public virtual UpdateItemResult<TCacheValue> Update(string key, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
         {
             NotNull(updateValue, nameof(updateValue));
+            this.CheckDisposed();
 
-            var original = this.GetCacheItem(key);
-            if (original == null)
+            lock (this.updateLock)
             {
-                return UpdateItemResult.ForItemDidNotExist<TCacheValue>();
-            }
+                var original = this.GetCacheItem(key);
+                if (original == null)
+                {
+                    return UpdateItemResult.ForItemDidNotExist<TCacheValue>();
+                }
 
-            var value = updateValue(original.Value);
-            this.Put(key, value);
-            return UpdateItemResult.ForSuccess<TCacheValue>(value);
+                var value = updateValue(original.Value);
+                var newItem = original.WithValue(value);
+                newItem.LastAccessedUtc = DateTime.UtcNow;
+                this.Put(newItem);
+                return UpdateItemResult.ForSuccess<TCacheValue>(value);
+            }
         }
 
         /// <summary>
@@ -150,28 +163,34 @@ namespace CacheManager.Core.Internal
         /// <param name="key">The key to update.</param>
         /// <param name="region">The cache region.</param>
         /// <param name="updateValue">The function to perform the update.</param>
-        /// <param name="config">The cache configuration used to specify the update behavior.</param>
+        /// <param name="maxRetries">The number of tries.</param>
         /// <returns>The update result which is interpreted by the cache manager.</returns>
         /// <exception cref="System.ArgumentNullException">
-        /// If key, region, updateValue or config are null.
+        /// If <paramref name="key"/>, <paramref name="region"/> or <paramref name="updateValue"/> is null.
         /// </exception>
         /// <remarks>
         /// If the cache does not use a distributed cache system. Update is doing exactly the same
         /// as Get plus Put.
         /// </remarks>
-        public virtual UpdateItemResult<TCacheValue> Update(string key, string region, Func<TCacheValue, TCacheValue> updateValue, UpdateItemConfig config)
+        public virtual UpdateItemResult<TCacheValue> Update(string key, string region, Func<TCacheValue, TCacheValue> updateValue, int maxRetries)
         {
             NotNull(updateValue, nameof(updateValue));
+            this.CheckDisposed();
 
-            var original = this.GetCacheItem(key, region);
-            if (original == null)
+            lock (this.updateLock)
             {
-                return UpdateItemResult.ForItemDidNotExist<TCacheValue>();
-            }
+                var original = this.GetCacheItem(key, region);
+                if (original == null)
+                {
+                    return UpdateItemResult.ForItemDidNotExist<TCacheValue>();
+                }
 
-            var value = updateValue(original.Value);
-            this.Put(key, value, region);
-            return UpdateItemResult.ForSuccess<TCacheValue>(value);
+                var value = updateValue(original.Value);
+                var newItem = original.WithValue(value);
+                newItem.LastAccessedUtc = DateTime.UtcNow;
+                this.Put(newItem);
+                return UpdateItemResult.ForSuccess<TCacheValue>(value);
+            }
         }
 
         /// <summary>
@@ -183,6 +202,7 @@ namespace CacheManager.Core.Internal
         /// </returns>
         protected internal override bool AddInternal(CacheItem<TCacheValue> item)
         {
+            this.CheckDisposed();
             item = this.GetItemExpiration(item);
             return this.AddInternalPrepared(item);
         }
@@ -194,6 +214,7 @@ namespace CacheManager.Core.Internal
         /// <param name="item">The <c>CacheItem</c> to be added to the cache.</param>
         protected internal override void PutInternal(CacheItem<TCacheValue> item)
         {
+            this.CheckDisposed();
             item = this.GetItemExpiration(item);
             this.PutInternalPrepared(item);
         }

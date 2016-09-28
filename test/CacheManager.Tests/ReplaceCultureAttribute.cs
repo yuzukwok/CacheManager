@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using System.Threading;
@@ -7,56 +6,53 @@ using Xunit.Sdk;
 
 namespace CacheManager.Tests
 {
-    /// <summary>
-    /// Replaces the current culture and UI culture for the test.
-    /// </summary>
-    [ExcludeFromCodeCoverage]
-    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1019:DefineAccessorsForAttributeArguments", Justification = "nope")]
+    [AttributeUsage(AttributeTargets.Method)]
     public sealed class ReplaceCultureAttribute : BeforeAfterTestAttribute
     {
+        private const string DefaultCultureName = "en-GB";
+        private const string DefaultUICultureName = "en-US";
         private CultureInfo originalCulture;
         private CultureInfo originalUICulture;
 
         public ReplaceCultureAttribute()
+            : this(DefaultCultureName, DefaultUICultureName)
         {
-            this.Culture = "en-GB";
-            this.UICulture = "en-US";
         }
 
-        /// <summary>
-        /// Gets or sets <see cref="Thread.CurrentCulture" /> for the test. Defaults to en-GB.
-        /// </summary>
-        /// <value>
-        /// The culture.
-        /// </value>
-        /// <remarks>
-        /// <c>en-GB</c> is used here as the default because en-US is equivalent to the InvariantCulture.
-        /// We want to be able to find bugs where we're accidentally relying on the Invariant
-        /// instead of the user's culture.
-        /// </remarks>
-        public string Culture { get; set; }
+        public ReplaceCultureAttribute(string currentCulture, string currentUICulture)
+        {
+            this.CurrentCulture = new CultureInfo(currentCulture);
+            this.CurrentUICulture = new CultureInfo(currentUICulture);
+        }
 
-        /// <summary>
-        /// Gets or sets <see cref="Thread.CurrentUICulture" /> for the test. Defaults to en-US.
-        /// </summary>
-        /// <value>
-        /// The UI culture.
-        /// </value>
-        public string UICulture { get; set; }
+        public CultureInfo CurrentCulture { get; }
+
+        public CultureInfo CurrentUICulture { get; }
 
         public override void Before(MethodInfo methodUnderTest)
         {
-            this.originalCulture = Thread.CurrentThread.CurrentCulture;
-            this.originalUICulture = Thread.CurrentThread.CurrentUICulture;
+            this.originalCulture = CultureInfo.CurrentCulture;
+            this.originalUICulture = CultureInfo.CurrentUICulture;
 
-            Thread.CurrentThread.CurrentCulture = CultureInfo.GetCultureInfo(this.Culture);
-            Thread.CurrentThread.CurrentUICulture = CultureInfo.GetCultureInfo(this.UICulture);
+#if !DNXCORE50
+            Thread.CurrentThread.CurrentCulture = this.CurrentCulture;
+            Thread.CurrentThread.CurrentUICulture = this.CurrentUICulture;
+#else
+            CultureInfo.CurrentCulture = this.CurrentCulture;
+            CultureInfo.CurrentUICulture = this.CurrentUICulture;
+#endif
         }
 
         public override void After(MethodInfo methodUnderTest)
         {
+#if !DNXCORE50
             Thread.CurrentThread.CurrentCulture = this.originalCulture;
             Thread.CurrentThread.CurrentUICulture = this.originalUICulture;
+#else
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUICulture;
+#endif
         }
     }
 }

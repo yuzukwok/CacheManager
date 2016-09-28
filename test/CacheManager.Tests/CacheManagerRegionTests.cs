@@ -104,29 +104,58 @@ namespace CacheManager.Tests
 
                 // act
                 AddRegionData(cache, 20, 17, true, out keys, out regions);
-                var clearedRegion = regions.ElementAt((int)Math.Ceiling(regions.Count / 2d));
-                cache.ClearRegion(clearedRegion);
 
-                cache.Add("SomeNewItem", "Should be added to the region and the region should be re added to the cache.", clearedRegion);
-
-                // assert
-                foreach (var item in keys)
+                try
                 {
-                    var region = item.Item1;
-                    var key = item.Item2;
-                    var value = item.Item3;
+                    var clearedRegion = regions.ElementAt((int)Math.Ceiling(regions.Count / 2d));
+                    cache.ClearRegion(clearedRegion);
 
-                    cache[key].Should().BeNull("the cache should not find the item without region specified");
-                    if (region == clearedRegion)
+                    cache.Add("SomeNewItem", "Should be added to the region and the region should be re added to the cache.", clearedRegion);
+
+                    // assert
+                    foreach (var item in keys)
                     {
-                        cache[key, region].Should().BeNull("we cleared the region");
-                        cache["SomeNewItem", region].Should().NotBeNull();
-                    }
-                    else
-                    {
-                        cache[key, region].Should().Be(value, "item should be in cache for given region and key");
+                        var region = item.Item1;
+                        var key = item.Item2;
+                        var value = item.Item3;
+
+                        cache[key].Should().BeNull("the cache should not find the item without region specified");
+                        if (region == clearedRegion)
+                        {
+                            cache[key, region].Should().BeNull("we cleared the region");
+                            cache["SomeNewItem", region].Should().NotBeNull();
+                        }
+                        else
+                        {
+                            cache[key, region].Should().Be(value, "item should be in cache for given region and key");
+                        }
                     }
                 }
+                catch
+                {
+                    throw;
+                }
+            }
+        }
+
+        // Validates #64, Put has a different code path, at least in redis
+        [Theory]
+        [MemberData("TestCacheManagers")]
+        public void CacheManager_Region_Put_ClearRegion<T>(T cache)
+            where T : ICacheManager<object>
+        {
+            using (cache)
+            {
+                var key = Guid.NewGuid().ToString();
+                var region = Guid.NewGuid().ToString();
+
+                cache.Put(key, "put value", region);
+
+                cache.Get<string>(key, region).Should().NotBeNull();
+
+                cache.ClearRegion(region);
+
+                cache.Get(key, region).Should().BeNull();
             }
         }
 
@@ -248,6 +277,7 @@ namespace CacheManager.Tests
                 {
                     var key = sameKey ? sameKeyAllRegions + i : Guid.NewGuid().ToString();
                     var value = "Value in region " + r + ": " + i;
+
                     if (!cache.Add(key, value, region))
                     {
                         throw new InvalidOperationException("Adding key " + key + ":" + value + " didn't work.");

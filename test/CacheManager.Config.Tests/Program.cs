@@ -1,71 +1,104 @@
 ﻿using System;
-using System.Diagnostics;
+using System.Linq;
+using System.Threading;
 using CacheManager.Core;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace CacheManager.Config.Tests
 {
     internal class Program
     {
-        public Program()
+        public static void Main(string[] args)
         {
-        }
+            var configBuilder = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                .AddJsonFile("cache.json");
 
-        public void Main(string[] args)
-        {
-            var swatch = Stopwatch.StartNew();
+            var configuration = configBuilder.Build();
+
+            ////var cacheCfgf = configuration.GetCacheConfigurations().First();
+
+            ////var mgr = new BaseCacheManager<string>(cacheCfgf);
+
             int iterations = int.MaxValue;
-            swatch.Restart();
-            var cacheConfiguration = ConfigurationBuilder.BuildConfiguration(cfg =>
+            try
             {
-                cfg.WithUpdateMode(CacheUpdateMode.Up);
-                cfg.WithMaxRetries(10);
+                var builder = new Core.ConfigurationBuilder("myCache");
+                builder.WithMicrosoftLogging(f =>
+                {
+                    f.AddConsole(LogLevel.Warning);
+                    f.AddDebug(LogLevel.Debug);
+                });
 
-#if DNXCORE50
-                cfg.WithDictionaryHandle()
-                    .EnablePerformanceCounters();
-                Console.WriteLine("Using Dictionary cache handle");
-#else
-                cfg.WithSystemRuntimeCacheHandle()
+                builder.WithUpdateMode(CacheUpdateMode.Up);
+                builder.WithRetryTimeout(1000);
+                builder.WithMaxRetries(10);
+
+//#if NETCORE
+//                builder.WithDictionaryHandle("dic")
+//                    .DisableStatistics();
+
+//                //Console.WriteLine("Using Dictionary cache handle");
+//#else
+                builder.WithDictionaryHandle()
                     .DisableStatistics();
-                Console.WriteLine("Using System Runtime cache handle");
 
-                cfg.WithRedisCacheHandle("redis", true)
+                builder.WithRedisCacheHandle("redis", true)
                     .DisableStatistics();
 
-                cfg.WithJsonSerializer();
+                builder.WithRedisBackplane("redis");
 
-                //cfg.WithRedisBackPlate("redis");
-
-                cfg.WithRedisConfiguration("redis", config =>
+                builder.WithRedisConfiguration("redis", config =>
                 {
                     config
                         .WithAllowAdmin()
                         .WithDatabase(0)
-                        .WithConnectionTimeout(100)
+                        .WithConnectionTimeout(5000)
+                        //.WithEndpoint("ubuntu-local", 7024);
+                        //.WithEndpoint("127.0.0.1", 6380)
                         .WithEndpoint("127.0.0.1", 6379);
+                        //.WithEndpoint("192.168.178.34", 7001);
                 });
-#endif
-            });
-            
-            for (int i = 0; i < iterations; i++)
+
+                builder.WithJsonSerializer();
+
+                Console.WriteLine("Using Redis cache handle");
+//#endif
+                var cacheA = new BaseCacheManager<object>(builder.Build());
+                cacheA.Clear();
+
+                for (int i = 0; i < iterations; i++)
+                {
+                    try
+                    {
+                        Tests.PutAndMultiGetTest(cacheA);
+                    }
+                    catch (AggregateException ex)
+                    {
+                        ex.Handle((e) =>
+                        {
+                            Console.WriteLine(e);
+                            return true;
+                        });
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine("Error: " + e.Message + "\n" + e.StackTrace);
+                        Thread.Sleep(1000);
+                    }
+
+                    Console.WriteLine("---------------------------------------------------------");
+                }
+            }
+            catch (Exception ex)
             {
-                ////Tests.RandomRWTest(CacheFactory.FromConfiguration<Item>(cacheConfiguration));
-
-                Tests.CacheThreadTest(
-                    CacheFactory.FromConfiguration<string>(cacheConfiguration),
-                    i + 10);
-
-                Tests.SimpleAddGetTest(
-                    CacheFactory.FromConfiguration<object>(cacheConfiguration));
-
-                // Console.WriteLine(string.Format("Iterations ended after {0}ms.", swatch.ElapsedMilliseconds));
-                Console.WriteLine("---------------------------------------------------------");
-                swatch.Restart();
+                Console.WriteLine(ex);
             }
 
             Console.ForegroundColor = ConsoleColor.DarkGreen;
             Console.WriteLine("We are done...");
-            Console.ReadLine();
+            Console.ForegroundColor = ConsoleColor.Gray;
+            Console.ReadKey();
         }
     }
 }

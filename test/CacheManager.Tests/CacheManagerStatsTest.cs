@@ -50,7 +50,7 @@ namespace CacheManager.Tests
                 r1.Should().Be("something");
                 r2.Should().Be("something");
 
-                // each cachhandle stats should have one addCall increase
+                // each cache handle stats should have one addCall increase
                 addCalls.ShouldAllBeEquivalentTo(Enumerable.Repeat(1, cache.CacheHandles.Count()));
 
                 items.ShouldAllBeEquivalentTo(
@@ -197,8 +197,6 @@ namespace CacheManager.Tests
             }
         }
 
-        // This does run on Mono 4.2.x (alpha), disabling it for now TODO: enable if travis ci runs new version of mono
-        [Trait("category", "Mono")]
         [Theory]
         [MemberData("TestCacheManagers")]
         [ReplaceCulture]
@@ -221,13 +219,6 @@ namespace CacheManager.Tests
                     },
                     threads,
                     iterations);
-            }
-
-            // item should have been added only once (not true in back plate scenarios)
-            if (!cache.Configuration.HasBackPlate)
-            {
-                adds.ShouldAllBeEquivalentTo(
-                        Enumerable.Repeat(1, cache.CacheHandles.Count()));
             }
 
             puts.ShouldAllBeEquivalentTo(

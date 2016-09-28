@@ -7,6 +7,14 @@
 *.sln.docstates
 *.lock.json
 
+/Documentation/_site
+/Documentation/api/*.yml
+/Documentation/api/*.manifest
+/Documentation/msdn.4.5.2
+/Documentation/packages
+/Documentation/.nuget
+/.nuget/nuget.exe
+
 # Build results
 
 [Dd]ebug/
@@ -161,3 +169,5 @@ $RECYCLE.BIN/
 /.vs/config/applicationhost.config
 /tools/redis/packages/Redis-64
 /tools/redis/.nuget
+/.build
+/.vs

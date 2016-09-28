@@ -1,4 +1,5 @@
-﻿using System;
+﻿#if !DNXCORE50
+using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using CacheManager.Core;
@@ -47,9 +48,10 @@ namespace CacheManager.Tests
                 .WithMessage("*Parameter name: configName*");
         }
 
+#if !NO_APP_CONFIG
         [Fact]
         [ReplaceCulture]
-        [Trait("category", "Mono")]
+        [Trait("category", "NotOnMono")]
         public void CacheFactory_FromConfig_NonGeneric_NullCheck_A()
         {
             // arrange
@@ -78,7 +80,7 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        [Trait("category", "Mono")]
+        [Trait("category", "NotOnMono")]
         public void CacheFactory_FromConfig_NonGeneric_NullCheck_C()
         {
             // arrange
@@ -90,6 +92,7 @@ namespace CacheManager.Tests
             act.ShouldThrow<ArgumentNullException>()
                 .WithMessage("*cacheValueType*");
         }
+#endif
 
         [Fact]
         [ReplaceCulture]
@@ -100,7 +103,7 @@ namespace CacheManager.Tests
             // act
             Action act = () => CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), null);
+                settings.WithDictionaryHandle(null);
             });
 
             // assert
@@ -130,7 +133,7 @@ namespace CacheManager.Tests
             Func<ICacheManager<string>> act = () => CacheFactory.Build<string>(settings =>
             {
                 settings.WithUpdateMode(CacheUpdateMode.Full)
-                    .WithHandle(typeof(DictionaryCacheHandle<>), "h1")
+                    .WithDictionaryHandle("h1")
                     .DisablePerformanceCounters();
             });
 
@@ -147,7 +150,7 @@ namespace CacheManager.Tests
             Func<ICacheManager<string>> act = () => CacheFactory.Build<string>(settings =>
             {
                 settings.WithUpdateMode(CacheUpdateMode.Full)
-                    .WithHandle(typeof(DictionaryCacheHandle<>), "h1")
+                    .WithDictionaryHandle("h1")
                     .DisableStatistics() // disable it first
                     .EnablePerformanceCounters();   // should enable stats
             });
@@ -165,7 +168,7 @@ namespace CacheManager.Tests
             Func<ICacheManager<string>> act = () => CacheFactory.Build<string>(settings =>
             {
                 settings.WithUpdateMode(CacheUpdateMode.Full)
-                    .WithHandle(typeof(DictionaryCacheHandle<>), "h1")
+                    .WithDictionaryHandle("h1")
                     .EnableStatistics();
             });
 
@@ -182,7 +185,7 @@ namespace CacheManager.Tests
             Func<ICacheManager<string>> act = () => CacheFactory.Build<string>(settings =>
             {
                 settings.WithUpdateMode(CacheUpdateMode.Full)
-                    .WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    .WithDictionaryHandle("h1");
             });
 
             // assert
@@ -198,7 +201,7 @@ namespace CacheManager.Tests
             Action act = () => CacheFactory.Build<string>(settings =>
             {
                 settings.WithUpdateMode(CacheUpdateMode.Full)
-                    .WithHandle(typeof(DictionaryCacheHandle<>), "h1")
+                    .WithDictionaryHandle("h1")
                         .WithExpiration(ExpirationMode.Absolute, TimeSpan.Zero);
             });
 
@@ -239,14 +242,15 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheFactory_Build_WithRedisBackPlateNoBackplateSource()
+        public void CacheFactory_Build_WithRedisBackplaneNoBackplaneSource()
         {
             // arrange act
             Action act = () =>
             {
                 var cache = CacheFactory.Build<object>(settings =>
                {
-                   settings.WithRedisBackPlate("redis");
+                   settings.WithDictionaryHandle();
+                   settings.WithRedisBackplane("redis");
                });
 
                 cache.Add("test", "test");
@@ -260,12 +264,12 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheFactory_Build_WithRedisBackPlateTooManyBackplateSources()
+        public void CacheFactory_Build_WithRedisBackplaneTooManyBackplaneSources()
         {
             // arrange act
             Action act = () => CacheFactory.Build<object>(settings =>
            {
-               settings.WithRedisBackPlate("redis");
+               settings.WithRedisBackplane("redis");
                settings.WithSystemRuntimeCacheHandle("redis", true);
                settings.WithSystemRuntimeCacheHandle("redis", true);
            });
@@ -277,33 +281,33 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheFactory_Build_WithRedisBackPlateNoRedisConfig()
+        public void CacheFactory_Build_WithRedisBackplaneNoRedisConfig()
         {
             // arrange act
             Action act = () => CacheFactory.Build<object>(settings =>
            {
-               settings.WithRedisBackPlate("redis");
+               settings.WithRedisBackplane("redis");
                settings.WithSystemRuntimeCacheHandle("redis", true);
            });
 
             // assert
             act.ShouldThrow<InvalidOperationException>()
-                .WithMessage("*No configuration added for configuration name redis*");
+                .WithInnerMessage("*No configuration added for configuration name redis*");
         }
 
         [Fact]
         [ReplaceCulture]
-        public void CacheFactory_Build_WithRedisBackPlateNoName()
+        public void CacheFactory_Build_WithRedisBackplaneNoName()
         {
             // arrange act
             Action act = () => CacheFactory.Build<object>(settings =>
            {
-               settings.WithRedisBackPlate(string.Empty);
+               settings.WithRedisBackplane(string.Empty);
            });
 
             // assert
             act.ShouldThrow<ArgumentException>()
-                .WithMessage("*Parameter name: name*");
+                .WithMessage("*Parameter name: configurationKey*");
         }
 
         [Fact]
@@ -327,9 +331,9 @@ namespace CacheManager.Tests
         {
             // arrange act
             Action act = () => CacheFactory.Build<object>(settings =>
-           {
-               settings.WithRedisConfiguration(string.Empty, config => { });
-           });
+            {
+                settings.WithRedisConfiguration(string.Empty, config => { });
+            });
 
             // assert
             act.ShouldThrow<ArgumentException>()
@@ -342,9 +346,9 @@ namespace CacheManager.Tests
         {
             // arrange act
             Action act = () => CacheFactory.Build<object>(settings =>
-           {
-               settings.WithRedisConfiguration("redis", config => config.WithEndpoint(string.Empty, 0));
-           });
+            {
+                settings.WithRedisConfiguration("redis", config => config.WithEndpoint(string.Empty, 0));
+            });
 
             // assert
             act.ShouldThrow<ArgumentException>()
@@ -360,9 +364,10 @@ namespace CacheManager.Tests
 
             // act
             CacheFactory.Build<object>(settings =>
-           {
-               settings.WithRedisConfiguration("redisWithConnectionString", connection);
-           });
+            {
+                settings.WithDictionaryHandle();
+                settings.WithRedisConfiguration("redisWithConnectionString", connection);
+            });
 
             var config = RedisConfigurations.GetConfiguration("redisWithConnectionString");
 
@@ -377,18 +382,19 @@ namespace CacheManager.Tests
         {
             // arrange act
             CacheFactory.Build<object>(settings =>
-           {
-               settings.WithRedisConfiguration("redisBuildUpConfiguration", config =>
-               {
-                   config.WithAllowAdmin()
-                       .WithConnectionTimeout(221113)
-                       .WithDatabase(22)
-                       .WithEndpoint("127.0.0.1", 2323)
-                       .WithEndpoint("nohost", 99999)
-                       .WithPassword("secret")
-                       .WithSsl("mySslHost");
-               });
-           });
+            {
+                settings.WithDictionaryHandle();
+                settings.WithRedisConfiguration("redisBuildUpConfiguration", config =>
+                {
+                    config.WithAllowAdmin()
+                        .WithConnectionTimeout(221113)
+                        .WithDatabase(22)
+                        .WithEndpoint("127.0.0.1", 2323)
+                        .WithEndpoint("nohost", 99999)
+                        .WithPassword("secret")
+                        .WithSsl("mySslHost");
+                });
+            });
 
             var configuration = RedisConfigurations.GetConfiguration("redisBuildUpConfiguration");
 
@@ -419,56 +425,69 @@ namespace CacheManager.Tests
                     .WithMaxRetries(22)
                     .WithRetryTimeout(2223)
                     .WithUpdateMode(CacheUpdateMode.Full)
-                    .WithHandle(typeof(DictionaryCacheHandle<>), "h1")
+                    .WithDictionaryHandle("h1")
                         .WithExpiration(ExpirationMode.Absolute, TimeSpan.FromHours(12))
                         .EnablePerformanceCounters()
-                    .And.WithHandle(typeof(DictionaryCacheHandle<>), "h2")
+                    .And.WithDictionaryHandle("h2")
                         .WithExpiration(ExpirationMode.None, TimeSpan.Zero)
                         .DisableStatistics()
-                    .And.WithHandle(typeof(DictionaryCacheHandle<>), "h3")
+                    .And.WithDictionaryHandle("h3")
                         .WithExpiration(ExpirationMode.Sliding, TimeSpan.FromSeconds(231))
                         .EnableStatistics();
             });
 
             // assert
             RedisConfigurations.GetConfiguration("myRedis").Should().NotBeNull();
-            act.Configuration.CacheUpdateMode.Should().Be(CacheUpdateMode.Full);
+            act.Configuration.UpdateMode.Should().Be(CacheUpdateMode.Full);
             act.Configuration.MaxRetries.Should().Be(22);
             act.Configuration.RetryTimeout.Should().Be(2223);
-            act.CacheHandles.ElementAt(0).Configuration.HandleName.Should().Be("h1");
+            act.CacheHandles.ElementAt(0).Configuration.Name.Should().Be("h1");
             act.CacheHandles.ElementAt(0).Configuration.EnablePerformanceCounters.Should().BeTrue();
             act.CacheHandles.ElementAt(0).Configuration.EnableStatistics.Should().BeTrue();
             act.CacheHandles.ElementAt(0).Configuration.ExpirationMode.Should().Be(ExpirationMode.Absolute);
             act.CacheHandles.ElementAt(0).Configuration.ExpirationTimeout.Should().Be(new TimeSpan(12, 0, 0));
 
-            act.CacheHandles.ElementAt(1).Configuration.HandleName.Should().Be("h2");
+            act.CacheHandles.ElementAt(1).Configuration.Name.Should().Be("h2");
             act.CacheHandles.ElementAt(1).Configuration.EnablePerformanceCounters.Should().BeFalse();
             act.CacheHandles.ElementAt(1).Configuration.EnableStatistics.Should().BeFalse();
             act.CacheHandles.ElementAt(1).Configuration.ExpirationMode.Should().Be(ExpirationMode.None);
             act.CacheHandles.ElementAt(1).Configuration.ExpirationTimeout.Should().Be(new TimeSpan(0, 0, 0));
 
-            act.CacheHandles.ElementAt(2).Configuration.HandleName.Should().Be("h3");
+            act.CacheHandles.ElementAt(2).Configuration.Name.Should().Be("h3");
             act.CacheHandles.ElementAt(2).Configuration.EnablePerformanceCounters.Should().BeFalse();
             act.CacheHandles.ElementAt(2).Configuration.EnableStatistics.Should().BeTrue();
             act.CacheHandles.ElementAt(2).Configuration.ExpirationMode.Should().Be(ExpirationMode.Sliding);
             act.CacheHandles.ElementAt(2).Configuration.ExpirationTimeout.Should().Be(new TimeSpan(0, 0, 231));
         }
 
+#if !NO_APP_CONFIG
         [Fact]
         [ReplaceCulture]
-        public void CacheFactory_Build_NonGenericWithType()
+        [Trait("category", "NotOnMono")]
+        public void CacheFactory_FromConfig_Generic_A()
         {
-            var cache = CacheFactory.Build(
-                typeof(string),
-                settings => settings.WithSystemRuntimeCacheHandle()) as ICacheManager<string>;
+            var cache = CacheFactory.FromConfiguration<byte[]>("c1");
 
             cache.Should().NotBeNull();
-            cache.CacheHandles.Count().Should().Be(1);
+            cache.CacheHandles.Count().Should().Be(3);
+            cache.Name.Should().Be("c1");
         }
 
         [Fact]
         [ReplaceCulture]
-        [Trait("category", "Mono")]
+        [Trait("category", "NotOnMono")]
+        public void CacheFactory_FromConfig_Generic_B()
+        {
+            var cache = CacheFactory.FromConfiguration<byte[]>("c1", "cacheManager");
+
+            cache.Should().NotBeNull();
+            cache.CacheHandles.Count().Should().Be(3);
+            cache.Name.Should().Be("c1");
+        }
+
+        [Fact]
+        [ReplaceCulture]
+        [Trait("category", "NotOnMono")]
         public void CacheFactory_FromConfig_NonGeneric_A()
         {
             var cache = CacheFactory.FromConfiguration(typeof(string), "c1") as ICacheManager<string>;
@@ -480,7 +499,7 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        [Trait("category", "Mono")]
+        [Trait("category", "NotOnMono")]
         public void CacheFactory_FromConfig_NonGeneric_B()
         {
             var cache = CacheFactory.FromConfiguration(typeof(string), "c1", "cacheManager") as ICacheManager<string>;
@@ -501,25 +520,18 @@ namespace CacheManager.Tests
             cache.Should().NotBeNull();
             cache.CacheHandles.Count().Should().Be(1);
         }
+#endif
 
         [Fact]
         [ReplaceCulture]
-        public void CacheFactory_Build_WithSerializer_TypeNull()
+        public void CacheFactory_Build_NonGenericWithType()
         {
-            Action act = () => CacheFactory.Build(
-                p => p.WithSerializer(null));
+            var cache = CacheFactory.Build(
+                typeof(string),
+                settings => settings.WithSystemRuntimeCacheHandle()) as ICacheManager<string>;
 
-            act.ShouldThrow<ArgumentNullException>().WithMessage("*serializerType*");
-        }
-
-        [Fact]
-        [ReplaceCulture]
-        public void CacheFactory_Build_WithSerializer_TypeInvalid()
-        {
-            Action act = () => CacheFactory.Build(
-                p => p.WithSerializer(typeof(string)));
-
-            act.ShouldThrow<InvalidOperationException>().WithMessage("*must implement " + nameof(ICacheSerializer) + "*");
+            cache.Should().NotBeNull();
+            cache.CacheHandles.Count().Should().Be(1);
         }
 
         [Fact]
@@ -531,8 +543,8 @@ namespace CacheManager.Tests
                     .WithJsonSerializer()
                     .WithSystemRuntimeCacheHandle());
 
-            cache.Configuration.CacheSerializer.Should().NotBeNull();
-            cache.Configuration.CacheSerializer.GetType().Should().Be(typeof(JsonCacheSerializer));
+            cache.Configuration.SerializerType.Should().NotBeNull();
+            cache.Configuration.SerializerType.Should().Be(typeof(JsonCacheSerializer));
         }
 
         [Fact]
@@ -553,10 +565,6 @@ namespace CacheManager.Tests
                 p => p
                     .WithJsonSerializer(serializationSettings, deserializationSettings)
                     .WithSystemRuntimeCacheHandle());
-
-            var serializer = cache.Configuration.CacheSerializer as JsonCacheSerializer;
-            serializer.SerializationSettings.ShouldBeEquivalentTo(serializationSettings);
-            serializer.DeserializationSettings.ShouldBeEquivalentTo(deserializationSettings);
         }
 
         [Fact]
@@ -568,8 +576,9 @@ namespace CacheManager.Tests
                 p.WithSerializer(typeof(BinaryCacheSerializer))
                     .WithSystemRuntimeCacheHandle());
 
-            cache.Configuration.CacheSerializer.Should().NotBeNull();
-            cache.Configuration.CacheSerializer.GetType().Should().Be(typeof(BinaryCacheSerializer));
+            cache.Configuration.SerializerType.Should().NotBeNull();
+            cache.Configuration.SerializerType.Should().Be(typeof(BinaryCacheSerializer));
         }
     }
 }
+#endif

@@ -1,30 +1,58 @@
-﻿{
+{
   "dependencies": {
-    "CacheManager.Couchbase": "",
-    "CacheManager.MemCached": "",
-    "CacheManager.StackExchange.Redis": "",
-    "CacheManager.SystemRuntimeCaching": "",
-    "CacheManager.Serialization.Json": "",
-    "CacheManager.Web": "",
-    "FluentAssertions": "4.1.0",
-    "Moq": "4.2.1510.2205",
-    "xunit.runner.aspnet": "2.0.0-aspnet-rc1-*"
+    "CacheManager.Microsoft.Extensions.Caching.Memory": { "target": "project" },
+    "CacheManager.Microsoft.Extensions.Configuration": { "target": "project" },
+    "CacheManager.Microsoft.Extensions.Logging": { "target": "project" },
+    "CacheManager.StackExchange.Redis": { "target": "project" },
+    "CacheManager.Serialization.Json": { "target": "project" },
+    "CacheManager.Serialization.ProtoBuf": { "target": "project" },
+    "FluentAssertions": "4.12.0",
+    "Microsoft.Extensions.Configuration.Json": "1.0.0",
+    "Microsoft.Extensions.Logging": "1.0.0",
+    "Microsoft.Extensions.Logging.Console": "1.0.0",
+    "Microsoft.Extensions.Logging.Debug": "1.0.0",
+    "xunit": "2.2.0-beta2-build3300",
+    "dotnet-test-xunit": "2.2.0-preview2-build1029"
   },
+  "buildOptions": {
+    "copyToOutput": [
+      "app.config",
+      "Configuration/*.*",
+      "xunit.runner.json"
+    ]
+  },
+  "testRunner": "xunit",
   "frameworks": {
-    "dnx451": {
-      "frameworkAssemblies": {
-        "System.Reflection": ""
-      },
-      "compilationOptions": {
+    "net451": {
+      "buildOptions": {
         "define": [
           "REDISENABLED",
-          "MOCK_HTTPCONTEXT_ENABLED"
+          "MOCK_HTTPCONTEXT_ENABLED",
+          "NO_APP_CONFIG"
         ]
+      },
+      "dependencies": {
+        "CacheManager.SystemRuntimeCaching": { "target": "project" },
+        "CacheManager.Web": { "target": "project" },
+        "CacheManager.Couchbase": { "target": "project" },
+        "CacheManager.Memcached": { "target": "project" }
+      },
+      "frameworkAssemblies": {
+        "System.Runtime": "",
+        "System.Threading.Tasks": "",
+        "System.Reflection": "",
+        "System.Configuration": ""
+      }
+    },
+    "netcoreapp1.0": {
+      "buildOptions": { "define": [ "REDISENABLED", "DNXCORE50" ] },
+      "dependencies": {
+        "Microsoft.NETCore.App": {
+          "version": "1.0.0",
+          "type": "platform"
+        },
+        "System.Diagnostics.TraceSource": "4.0.0"
       }
     }
-  },
-  "commands": {
-    "test": "xunit.runner.aspnet -notrait category=Memcached -notrait category=Unreliable",
-    "test-all": "xunit.runner.aspnet"
   }
 }

@@ -36,6 +36,7 @@
     <DocumentationFile>bin\Release\CacheManager.StackExchange.Redis.XML</DocumentationFile>
     <CodeAnalysisRuleSet>..\..\common\CacheManager.ruleset</CodeAnalysisRuleSet>
     <RunCodeAnalysis>true</RunCodeAnalysis>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <PropertyGroup>
     <SignAssembly>false</SignAssembly>
@@ -46,7 +47,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="StackExchange.Redis, Version=1.0.316.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\StackExchange.Redis.1.0.450\lib\net45\StackExchange.Redis.dll</HintPath>
+      <HintPath>..\..\packages\StackExchange.Redis.1.0.488\lib\net45\StackExchange.Redis.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="System" />
@@ -58,11 +59,8 @@
     <Compile Include="..\..\common\GlobalAssemblyInfo.cs">
       <Link>Properties\GlobalAssemblyInfo.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.StackExchange.Redis\ConfigurationBuilderExtensions.cs">
-      <Link>ConfigurationBuilderExtensions.cs</Link>
-    </Compile>
-    <Compile Include="..\CacheManager.StackExchange.Redis\RedisCacheBackPlate.cs">
-      <Link>RedisCacheBackPlate.cs</Link>
+    <Compile Include="..\CacheManager.StackExchange.Redis\RedisCacheBackplane.cs">
+      <Link>RedisCacheBackplane.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.StackExchange.Redis\RedisCacheHandle.cs">
       <Link>RedisCacheHandle.cs</Link>
@@ -73,14 +71,17 @@
     <Compile Include="..\CacheManager.StackExchange.Redis\RedisConfigurationBuilder.cs">
       <Link>RedisConfigurationBuilder.cs</Link>
     </Compile>
+    <Compile Include="..\CacheManager.StackExchange.Redis\RedisConfigurationBuilderExtensions.cs">
+      <Link>RedisConfigurationBuilderExtensions.cs</Link>
+    </Compile>
     <Compile Include="..\CacheManager.StackExchange.Redis\RedisConfigurations.cs">
       <Link>RedisConfigurations.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.StackExchange.Redis\RedisConfigurationSection.cs">
       <Link>RedisConfigurationSection.cs</Link>
     </Compile>
-    <Compile Include="..\CacheManager.StackExchange.Redis\RedisConnectionPool.cs">
-      <Link>RedisConnectionPool.cs</Link>
+    <Compile Include="..\CacheManager.StackExchange.Redis\RedisConnectionManager.cs">
+      <Link>RedisConnectionManager.cs</Link>
     </Compile>
     <Compile Include="..\CacheManager.StackExchange.Redis\RedisValueConverter.cs">
       <Link>RedisValueConverter.cs</Link>
@@ -100,9 +101,14 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\Newtonsoft.Json.dll" />
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\StyleCop.Analyzers.CodeFixes.dll" />
-    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0-rc1\analyzers\dotnet\cs\StyleCop.Analyzers.dll" />
+    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0\analyzers\dotnet\cs\Newtonsoft.Json.dll" />
+    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0\analyzers\dotnet\cs\StyleCop.Analyzers.CodeFixes.dll" />
+    <Analyzer Include="..\..\packages\StyleCop.Analyzers.1.0.0\analyzers\dotnet\cs\StyleCop.Analyzers.dll" />
+  </ItemGroup>
+  <ItemGroup>
+    <CodeAnalysisDictionary Include="..\..\common\CustomDictionary.xml">
+      <Link>CustomDictionary.xml</Link>
+    </CodeAnalysisDictionary>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

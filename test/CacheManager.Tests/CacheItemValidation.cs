@@ -25,12 +25,49 @@ namespace CacheManager.Tests
 
             // assert
             result.ExpirationMode.Should().Be(ExpirationMode.Absolute);
-            result.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10));
+            result.ExpirationTimeout.Should().BeCloseTo(TimeSpan.FromMinutes(10), precision: 200);
             result.Value.Should().Be(baseItem.Value);
             result.Region.Should().Be(baseItem.Region);
             result.Key.Should().Be(baseItem.Key);
             result.CreatedUtc.Should().Be(baseItem.CreatedUtc);
             result.LastAccessedUtc.Should().Be(baseItem.LastAccessedUtc);
+        }
+
+        [Fact]
+        public void CacheItem_WithAbsoluteExpiration_Invalid()
+        {
+            // arrange
+            var baseItem = new CacheItem<object>("key", "region", "value", ExpirationMode.Sliding, TimeSpan.FromDays(10));
+
+            // act
+            Action act = () => baseItem.WithAbsoluteExpiration(DateTimeOffset.Now.AddMinutes(-10));
+
+            // assert
+            act.ShouldThrow<ArgumentException>().WithMessage("*value must be greater*");
+        }
+
+        [Fact]
+        public void CacheItem_WithSlidingExpiration_Invalid()
+        {
+            // arrange
+            var baseItem = new CacheItem<object>("key", "region", "value", ExpirationMode.Sliding, TimeSpan.FromDays(10));
+
+            // act
+            Action act = () => baseItem.WithSlidingExpiration(TimeSpan.FromDays(-1));
+
+            // assert
+            act.ShouldThrow<ArgumentException>().WithMessage("*value must be greater*");
+        }
+
+        [Fact]
+        public void CacheItem_WithExpiration_Invalid()
+        {
+            // arrange
+            // act
+            Action act = () => new CacheItem<object>("key", "region", "value", ExpirationMode.Sliding, TimeSpan.FromTicks(long.MaxValue));
+
+            // assert
+            act.ShouldThrow<ArgumentOutOfRangeException>().WithMessage("*365*");
         }
 
         [Fact]
@@ -640,5 +677,24 @@ namespace CacheManager.Tests
         }
 
         #endregion ctor4
+
+        [Fact]
+        [ReplaceCulture]
+        public void CacheItem_Ctor_ExpirationTimeoutDefaults()
+        {
+            // arrange
+            string key = "key";
+            object value = "value";
+
+            // act
+            var act = new CacheItem<object>(key, value, ExpirationMode.None, TimeSpan.FromDays(1));
+
+            // assert - should reset to TimeSpan.Zero because mode is "None"
+            act.Should()
+                .Match<CacheItem<object>>(p => p.ExpirationMode == ExpirationMode.None)
+                .And.Match<CacheItem<object>>(p => p.ExpirationTimeout == TimeSpan.Zero)
+                .And.Match<CacheItem<object>>(p => p.Key == key)
+                .And.Match<CacheItem<object>>(p => p.Value == value);
+        }
     }
 }

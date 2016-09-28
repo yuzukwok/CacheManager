@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using CacheManager.Core;
 using CacheManager.Core.Internal;
 using FluentAssertions;
@@ -25,26 +27,6 @@ namespace CacheManager.Tests
         private static object runLock = new object();
 
         #region general
-
-        [Fact]
-        public void CacheManager_EmptyInitialization()
-        {
-            var cfg = ConfigurationBuilder.BuildConfiguration(settings => { });
-
-            // arrange
-            using (var cache = new BaseCacheManager<string>("cache", cfg))
-            {
-                var key = "key";
-
-                // act
-                cache.Add(key, "something");
-                var result = cache.Get(key);
-
-                // assert
-                cache.CacheHandles.Count().Should().Be(0);
-                result.Should().Be(null, "No handles in the cache managers should yield to no items in the cache");
-            }
-        }
 
         [Fact]
         public void CacheManager_AddCacheItem_WithExpMode_ButWithoutTimeout()
@@ -88,6 +70,35 @@ namespace CacheManager.Tests
                     .WithMessage("*Parameter name: configuration");
         }
 
+        [Fact]
+        [ReplaceCulture]
+        public void CacheManager_CtorA_NoConfig()
+        {
+            Action act = () => new BaseCacheManager<object>(null);
+            act.ShouldThrow<ArgumentException>()
+                    .WithMessage("*Parameter name: configuration");
+        }
+
+        [Fact]
+        [ReplaceCulture]
+        public void CacheManager_CtorA_ConfigNoName()
+        {
+            // name should be set from config and default is a Guid
+            var manager = new BaseCacheManager<object>(ConfigurationBuilder.BuildConfiguration(s => s.WithDictionaryHandle()));
+            manager.Name.Should().NotBeNullOrWhiteSpace();
+        }
+
+        [Fact]
+        [ReplaceCulture]
+        public void CacheManager_CtorA_ConfigWithName()
+        {
+            // name should be implicitly set
+            var manager = new BaseCacheManager<object>(
+                ConfigurationBuilder.BuildConfiguration("newName", s => s.WithDictionaryHandle()));
+
+            manager.Name.Should().Be("newName");
+        }
+
         #endregion general
 
         #region put params validation
@@ -98,7 +109,7 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // arrange act
@@ -120,7 +131,7 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 // arrange act
@@ -142,7 +153,7 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 // act
@@ -160,7 +171,7 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // act
@@ -181,7 +192,7 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 // arrange
@@ -210,7 +221,7 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 // arrange
@@ -238,14 +249,14 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // arrange act
                 Action act = () => cache.Update(null, null);
                 Action actR = () => cache.Update(null, "r", null);
-                Action actU = () => cache.Update(null, (o) => o, null);
-                Action actRU = () => cache.Update(null, null, null, null);
+                Action actU = () => cache.Update(null, (o) => o, 33);
+                Action actRU = () => cache.Update(null, null, null, 33);
 
                 // assert
                 act.ShouldThrow<ArgumentException>()
@@ -268,14 +279,14 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // arrange act
                 Action act = () => cache.Update("key", null);
                 Action actR = () => cache.Update("key", "region", null);
-                Action actU = () => cache.Update("key", null, new UpdateItemConfig());
-                Action actRU = () => cache.Update("key", "region", null, new UpdateItemConfig());
+                Action actU = () => cache.Update("key", null, 33);
+                Action actRU = () => cache.Update("key", "region", null, 33);
 
                 // assert
                 act.ShouldThrow<ArgumentException>()
@@ -298,12 +309,12 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // arrange act
                 Action actR = () => cache.Update("key", null, a => a);
-                Action actRU = () => cache.Update("key", null, a => a, new UpdateItemConfig());
+                Action actRU = () => cache.Update("key", null, a => a, 33);
 
                 // assert
                 actR.ShouldThrow<ArgumentException>()
@@ -320,19 +331,19 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // arrange act
-                Action act = () => cache.Update("key", a => a, null);
-                Action actR = () => cache.Update("key", "region", a => a, null);
+                Action act = () => cache.Update("key", a => a, -1);
+                Action actR = () => cache.Update("key", "region", a => a, -1);
 
                 // assert
-                act.ShouldThrow<ArgumentException>()
-                    .WithMessage("*Parameter name: config*");
+                act.ShouldThrow<InvalidOperationException>()
+                    .WithMessage("*retries must be greater than*");
 
-                actR.ShouldThrow<ArgumentException>()
-                    .WithMessage("*Parameter name: config*");
+                actR.ShouldThrow<InvalidOperationException>()
+                    .WithMessage("*retries must be greater than*");
             }
         }
 
@@ -394,14 +405,14 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // arrange act
                 Action act = () => cache.AddOrUpdate(null, null, (o) => o);
                 Action actR = () => cache.AddOrUpdate(null, "r", null, (o) => o);
-                Action actU = () => cache.AddOrUpdate(null, null, (o) => o, new UpdateItemConfig());
-                Action actRU = () => cache.AddOrUpdate(null, "r", null, null, null);
+                Action actU = () => cache.AddOrUpdate(null, null, (o) => o, 33);
+                Action actRU = () => cache.AddOrUpdate(null, "r", null, null, 33);
 
                 // assert
                 act.ShouldThrow<ArgumentException>()
@@ -424,16 +435,16 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // arrange act
                 Action act = () => cache.AddOrUpdate("key", "value", null);
                 Action actR = () => cache.AddOrUpdate("key", "region", "value", null);
-                Action actU = () => cache.AddOrUpdate("key", "value", null, new UpdateItemConfig());
-                Action actRU = () => cache.AddOrUpdate("key", "region", "value", null, null);
+                Action actU = () => cache.AddOrUpdate("key", "value", null, 1);
+                Action actRU = () => cache.AddOrUpdate("key", "region", "value", null, 1);
                 Action actI = () => cache.AddOrUpdate(new CacheItem<object>("k", "v"), null);
-                Action actIU = () => cache.AddOrUpdate(new CacheItem<object>("k", "v"), null, new UpdateItemConfig());
+                Action actIU = () => cache.AddOrUpdate(new CacheItem<object>("k", "v"), null, 1);
 
                 // assert
                 act.ShouldThrow<ArgumentException>()
@@ -456,12 +467,12 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // arrange act
                 Action actR = () => cache.AddOrUpdate("key", null, "value", a => a);
-                Action actRU = () => cache.AddOrUpdate("key", null, "value", a => a, new UpdateItemConfig());
+                Action actRU = () => cache.AddOrUpdate("key", null, "value", a => a, 1);
 
                 // assert
                 actR.ShouldThrow<ArgumentException>()
@@ -478,23 +489,23 @@ namespace CacheManager.Tests
         {
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // arrange act
-                Action actU = () => cache.AddOrUpdate("key", "value", (o) => o, null);
-                Action actRU = () => cache.AddOrUpdate("key", "region", "value", (o) => o, null);
-                Action actIU = () => cache.AddOrUpdate(new CacheItem<object>("k", "v"), (o) => o, null);
+                Action actU = () => cache.AddOrUpdate("key", "value", (o) => o, -1);
+                Action actRU = () => cache.AddOrUpdate("key", "region", "value", (o) => o, -1);
+                Action actIU = () => cache.AddOrUpdate(new CacheItem<object>("k", "v"), (o) => o, -1);
 
                 // assert
-                actU.ShouldThrow<ArgumentException>()
-                    .WithMessage("*Parameter name: config*");
+                actU.ShouldThrow<InvalidOperationException>()
+                    .WithMessage("*retries must be greater than*");
 
-                actRU.ShouldThrow<ArgumentException>()
-                    .WithMessage("*Parameter name: config*");
+                actRU.ShouldThrow<InvalidOperationException>()
+                    .WithMessage("*retries must be greater than*");
 
-                actIU.ShouldThrow<ArgumentException>()
-                    .WithMessage("*Parameter name: config*");
+                actIU.ShouldThrow<InvalidOperationException>()
+                    .WithMessage("*retries must be greater than*");
             }
         }
 
@@ -543,6 +554,185 @@ namespace CacheManager.Tests
 
         #endregion add or update call validation
 
+        #region get or add
+
+        [Fact]
+        [ReplaceCulture]
+        public void CacheManager_GetOrAdd_InvalidKey()
+        {
+            using (var cache = CacheFactory.Build(settings =>
+            {
+                settings.WithDictionaryHandle("h1");
+            }))
+            {
+                // arrange act
+                Action actA = () => cache.GetOrAdd(null, "value");
+                Action actB = () => cache.GetOrAdd(null, "region", "value");
+                Action actC = () => cache.GetOrAdd(null, (k) => "value");
+                Action actD = () => cache.GetOrAdd(null, "region", (k, r) => "value");
+
+                // assert
+                actA.ShouldThrow<ArgumentException>()
+                    .WithMessage("*key*");
+
+                actB.ShouldThrow<ArgumentException>()
+                    .WithMessage("*key*");
+
+                actC.ShouldThrow<ArgumentException>()
+                    .WithMessage("*key*");
+
+                actD.ShouldThrow<ArgumentException>()
+                    .WithMessage("*key*");
+            }
+        }
+
+        [Fact]
+        [ReplaceCulture]
+        public void CacheManager_GetOrAdd_InvalidRegion()
+        {
+            using (var cache = CacheFactory.Build(settings =>
+            {
+                settings.WithDictionaryHandle("h1");
+            }))
+            {
+                // arrange act
+                Action actA = () => cache.GetOrAdd("key", " ", "value");
+                Action actB = () => cache.GetOrAdd("key", null, (k, r) => "value");
+
+                // assert
+                actA.ShouldThrow<ArgumentException>()
+                    .WithMessage("*region*");
+
+                actB.ShouldThrow<ArgumentException>()
+                    .WithMessage("*region*");
+            }
+        }
+
+        [Fact]
+        [ReplaceCulture]
+        public void CacheManager_GetOrAdd_InvalidFactory()
+        {
+            using (var cache = CacheFactory.Build(settings =>
+            {
+                settings.WithDictionaryHandle("h1");
+            }))
+            {
+                // arrange act
+                Action actA = () => cache.GetOrAdd("key", null);
+                Action actB = () => cache.GetOrAdd("key", "region", null);
+
+                // assert
+                actA.ShouldThrow<ArgumentException>()
+                    .WithMessage("*valueFactory*");
+
+                actB.ShouldThrow<ArgumentException>()
+                    .WithMessage("*valueFactory*");
+            }
+        }
+
+        [Theory]
+        [MemberData("TestCacheManagers")]
+        public void CacheManager_GetOrAdd_SimpleAdd<T>(T cache)
+            where T : ICacheManager<object>
+        {
+            // arrange
+            var key = Guid.NewGuid().ToString();
+            var keyF = Guid.NewGuid().ToString();
+            var val = Guid.NewGuid().ToString();
+
+            using (cache)
+            {
+                // act
+                cache.GetOrAdd(key, val);
+                cache.GetOrAdd(key, "region", val);
+                cache.GetOrAdd(keyF, (k) => val);
+                cache.GetOrAdd(keyF, "region", (k, r) => val);
+
+                // assert
+                cache[key].Should().Be(val);
+                cache[key, "region"].Should().Be(val);
+                cache[keyF].Should().Be(val);
+                cache[keyF, "region"].Should().Be(val);
+            }
+        }
+
+        [Theory]
+        [MemberData("TestCacheManagers")]
+        public void CacheManager_GetOrAdd_SimpleGet<T>(T cache)
+            where T : ICacheManager<object>
+        {
+            // arrange
+            var key = Guid.NewGuid().ToString();
+            var keyF = Guid.NewGuid().ToString();
+            var val = Guid.NewGuid().ToString();
+            Func<string, object> add = (k) => { throw new InvalidOperationException(); };
+            Func<string, string, object> addRegion = (k, r) => { throw new InvalidOperationException(); };
+
+            using (cache)
+            {
+                cache.Add(key, val);
+                cache.Add(key, val, "region");
+                cache.Add(keyF, val);
+                cache.Add(keyF, val, "region");
+
+                // act
+                var result = cache.GetOrAdd(key, val);
+                var resultB = cache.GetOrAdd(key, "region", val);
+                Action act = () => cache.GetOrAdd(keyF, add);
+                Action actB = () => cache.GetOrAdd(keyF, "region", addRegion);
+
+                // assert
+                result.Should().Be(val);
+                resultB.Should().Be(val);
+                act.ShouldNotThrow();
+                actB.ShouldNotThrow();
+            }
+        }
+
+        [Theory(Skip = "not always working")]
+        [MemberData("TestCacheManagers")]
+        public void CacheManager_GetOrAdd_ForceRace<T>(T cache)
+            where T : ICacheManager<object>
+        {
+            // arrange
+            var key = Guid.NewGuid().ToString();
+            var val = Guid.NewGuid().ToString();
+            var counter = 0;
+            var results = new List<object>();
+
+            using (cache)
+            {
+                Action action = () =>
+                {
+                    var result = cache.GetOrAdd(key, (k) =>
+                    {
+                        Interlocked.Increment(ref counter);
+
+                        // force collision so that multiple threads try to add... yea thats long, but parallel should be fine
+                        Task.Delay(10).Wait();
+                        return counter;
+                    });
+
+                    lock (results)
+                    {
+                        results.Add(result);
+                    }
+                };
+
+                var actions = Enumerable.Repeat(action, 8);
+
+                Parallel.Invoke(new ParallelOptions() { MaxDegreeOfParallelism = 8 }, actions.ToArray());
+
+                // one of the threads one and added the key
+                var winner = (int)cache[key];
+
+                // all results should be the same because we should add the key only once
+                results.ShouldBeEquivalentTo(Enumerable.Repeat(winner, 8));
+            }
+        }
+
+        #endregion get or add
+
         #region Add validation
 
         [Fact]
@@ -552,7 +742,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 // act
@@ -576,7 +766,7 @@ namespace CacheManager.Tests
             using (var cache = CacheFactory.Build(
                 settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 // act
@@ -600,7 +790,7 @@ namespace CacheManager.Tests
             using (var cache = CacheFactory.Build(
                 settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 // act
@@ -619,7 +809,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 // act
@@ -641,7 +831,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 var key = "my key";
@@ -666,7 +856,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 var key = "my key";
@@ -686,12 +876,12 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheManager_Get_InvalideKey()
+        public void CacheManager_Get_InvalidKey()
         {
             // arrange
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // act
@@ -709,12 +899,12 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheManager_Get_InvalideRegion()
+        public void CacheManager_Get_InvalidRegion()
         {
             // arrange
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // act
@@ -728,12 +918,12 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheManager_GetItem_InvalideKey()
+        public void CacheManager_GetItem_InvalidKey()
         {
             // arrange
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // act
@@ -751,12 +941,12 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheManager_GetItem_InvalideRegion()
+        public void CacheManager_GetItem_InvalidRegion()
         {
             // arrange
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // act
@@ -770,12 +960,12 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheManager_GetT_InvalideKey()
+        public void CacheManager_GetT_InvalidKey()
         {
             // arrange
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // act
@@ -793,12 +983,12 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheManager_GetT_InvalideRegion()
+        public void CacheManager_GetT_InvalidRegion()
         {
             // arrange
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // act
@@ -817,7 +1007,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 string key = "some key";
@@ -837,7 +1027,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 string key = "some key";
@@ -862,7 +1052,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 string key = "some key";
@@ -886,12 +1076,12 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheManager_Remove_InvalideKey()
+        public void CacheManager_Remove_InvalidKey()
         {
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 // act
@@ -909,12 +1099,12 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheManager_Remove_InvalideRegion()
+        public void CacheManager_Remove_InvalidRegion()
         {
             // arrange
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // act
@@ -933,7 +1123,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 string key = string.Empty;
@@ -954,7 +1144,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 string key = "                ";
@@ -975,7 +1165,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 string key = "some key";
@@ -997,7 +1187,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 string key = "some key";
@@ -1019,12 +1209,12 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void CacheManager_Index_InvalideKey()
+        public void CacheManager_Index_InvalidKey()
         {
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 string key = null;
@@ -1050,7 +1240,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
             {
-                settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                settings.WithDictionaryHandle("h1");
             }))
             {
                 // act
@@ -1070,7 +1260,7 @@ namespace CacheManager.Tests
             // arrange
             using (var cache = CacheFactory.Build(settings =>
                 {
-                    settings.WithHandle(typeof(DictionaryCacheHandle<>), "h1");
+                    settings.WithDictionaryHandle("h1");
                 }))
             {
                 string key = "some key";
@@ -1085,149 +1275,17 @@ namespace CacheManager.Tests
 
         #endregion indexer
 
-        /// <summary>
-        /// Testing edge case, cache manager configuration without any handles It should at least
-        /// not throw or produce unexpected results.
-        /// </summary>
         #region testing empty handle list
 
         [Fact]
-        public void CacheManager_Add_NoCacheHandles()
+        public void CacheManager_NoCacheHandles()
         {
             // arrange
-            using (var cache = new BaseCacheManager<string>("name", new CacheManagerConfiguration() { MaxRetries = 1000 }))
-            {
-                // act
-                Func<bool> act = () => cache.Add("key", "value");
+            // act
+            Action act = () => new BaseCacheManager<string>("name", new CacheManagerConfiguration() { MaxRetries = 1000 });
 
-                // assert
-                act().Should().BeFalse("there are not cache handles configured to store the key");
-            }
-        }
-
-        [Fact]
-        public void CacheManager_AddOrUpdate_NoCacheHandles()
-        {
-            // arrange
-            using (var cache = new BaseCacheManager<string>("name", new CacheManagerConfiguration() { MaxRetries = 1000 }))
-            {
-                // act
-                Func<object> act = () => cache.AddOrUpdate("key", "value", item => item + " more");
-
-                // assert
-                act().Should().BeNull("there are not cache handles configured to store the key");
-            }
-        }
-
-        [Fact]
-        public void CacheManager_Clear_NoCacheHandles()
-        {
-            // arrange
-            using (var cache = new BaseCacheManager<string>("name", new CacheManagerConfiguration() { MaxRetries = 1000 }))
-            {
-                // act
-                Action act = () => cache.Clear();
-
-                // assert
-                act.ShouldNotThrow();
-            }
-        }
-
-        [Fact]
-        public void CacheManager_ClearRegion_NoCacheHandles()
-        {
-            // arrange
-            using (var cache = new BaseCacheManager<string>("name", new CacheManagerConfiguration() { MaxRetries = 1000 }))
-            {
-                // act
-                Action act = () => cache.ClearRegion("region");
-
-                // assert
-                act.ShouldNotThrow();
-            }
-        }
-
-        [Fact]
-        public void CacheManager_Get_NoCacheHandles()
-        {
-            // arrange
-            using (var cache = new BaseCacheManager<string>("name", new CacheManagerConfiguration() { MaxRetries = 1000 }))
-            {
-                // act
-                cache.Put("key", "value");
-                Func<string> act = () => cache["key"];
-                Func<string> act2 = () => cache.Get("key");
-                Func<string> act3 = () => cache.Get<string>("key");
-                Func<CacheItem<string>> act4 = () => cache.GetCacheItem("key");
-
-                // assert
-                act().Should().BeNull("there are not cache handles configured to store the key");
-                act2().Should().BeNull();
-                act3().Should().BeNull();
-                act4().Should().BeNull();
-            }
-        }
-
-        [Fact]
-        public void CacheManager_Put_NoCacheHandles()
-        {
-            // arrange
-            using (var cache = new BaseCacheManager<string>("name", new CacheManagerConfiguration() { MaxRetries = 1000 }))
-            {
-                // act
-                Func<string> act = () =>
-                {
-                    cache.Put("key", "value");
-                    return cache["key"];
-                };
-
-                // assert
-                act().Should().BeNull("there are not cache handles configured to store the key");
-            }
-        }
-
-        [Fact]
-        public void CacheManager_Remove_NoCacheHandles()
-        {
-            // arrange
-            using (var cache = new BaseCacheManager<string>("name", new CacheManagerConfiguration() { MaxRetries = 1000 }))
-            {
-                // act
-                Func<bool> act = () => cache.Remove("region");
-
-                // assert
-                act().Should().BeFalse();
-            }
-        }
-
-        [Fact]
-        public void CacheManager_TryUpdate_NoCacheHandles()
-        {
-            // arrange
-            using (var cache = new BaseCacheManager<string>("name", new CacheManagerConfiguration() { MaxRetries = 1000 }))
-            {
-                // act
-                string value = string.Empty;
-                Func<bool> act = () => cache.TryUpdate("region", p => p, out value);
-
-                // assert
-                act().Should().BeFalse();
-                value.Should().BeNull();
-            }
-        }
-
-        [Fact]
-        public void CacheManager_Update_NoCacheHandles()
-        {
-            // arrange
-            using (var cache = new BaseCacheManager<string>("name", new CacheManagerConfiguration() { MaxRetries = 1000 }))
-            {
-                // act
-                Func<string> act = () => cache.Update("region", p => p);
-
-                // assert
-                act().Should().BeNull();
-            }
+            // assert
+            act.ShouldThrow<InvalidOperationException>().WithMessage("*no cache handles*");
         }
 
         #endregion testing empty handle list
@@ -1438,7 +1496,11 @@ namespace CacheManager.Tests
         {
             using (cache)
             {
-                cache.Configuration.CacheUpdateMode = CacheUpdateMode.Full;
+                if (cache.Configuration.UpdateMode == CacheUpdateMode.None)
+                {
+                    // skip for none because we want to test the update mode
+                    return;
+                }
 
                 // arrange
                 var keys = new List<string>() { Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
@@ -1469,9 +1531,41 @@ namespace CacheManager.Tests
             }
         }
 
+        [Theory]
+        [MemberData("TestCacheManagers")]
+        public void CacheManager_IsCaseSensitive_Key<T>(T cache)
+            where T : ICacheManager<object>
+        {
+            using (cache)
+            {
+                cache.Remove("SomeKey");
+                cache.Add("SomeKey", "some value");
+
+                var result = cache.Get("somekeY");
+
+                result.Should().BeNull();
+            }
+        }
+
+        [Theory]
+        [MemberData("TestCacheManagers")]
+        public void CacheManager_IsCaseSensitive_Region<T>(T cache)
+            where T : ICacheManager<object>
+        {
+            using (cache)
+            {
+                cache.Remove("SomeKey", "Region");
+                cache.Add("SomeKey", "some value", "Region");
+
+                var result = cache.Get("SomeKey", "region");
+
+                result.Should().BeNull();
+            }
+        }
+
         private static void PopulateCache<T>(ICacheManager<T> cache, IList<string> keys, IList<T> values, int mode)
         {
-            // let us make this safe per run so cache doesn't get cleared/populated from ultiple tests
+            // let us make this safe per run so cache doesn't get cleared/populated from multiple tests
             lock (runLock)
             {
                 foreach (var key in keys)
@@ -1508,7 +1602,7 @@ namespace CacheManager.Tests
             var cacheCfgText = "Cache: " + cache.Name;
             cacheCfgText += ", Handles: " + string.Join(
                 ",",
-                cache.CacheHandles.Select(p => p.Configuration.HandleName).ToArray());
+                cache.CacheHandles.Select(p => p.Configuration.Name).ToArray());
 
             Debug.WriteLine("Validating for cache: " + cacheCfgText);
             values.Select((value, index) =>
@@ -1528,13 +1622,20 @@ namespace CacheManager.Tests
             }).ToList();
         }
 
+#if !DNXCORE50
+
         [Serializable]
+#endif
+        [ProtoBuf.ProtoContract]
         public class ComplexType
         {
+            [ProtoBuf.ProtoMember(1)]
             public string Name { get; set; }
 
+            [ProtoBuf.ProtoMember(2)]
             public long SomeId { get; set; }
 
+            [ProtoBuf.ProtoMember(3)]
             public bool SomeBool { get; set; }
 
             public override bool Equals(object obj)

@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Threading;
 using CacheManager.Core;
+using FluentAssertions;
 using Xunit;
 using static CacheManager.Core.Utility.Guard;
 
@@ -15,10 +17,63 @@ namespace CacheManager.Tests
     [Trait("Framework", "NET45")]
 #endif
 
-    // This does run on Mono 4.2.x (alpha), disabling it for now TODO: enable if travis ci runs new version of mono
-    [Trait("category", "Mono")]
     public class ThreadRandomReadWriteTestBase : BaseCacheManagerTest
     {
+        [Theory]
+        [MemberData("TestCacheManagers")]
+        public void Thread_Update(ICacheManager<object> cache)
+        {
+            using (cache)
+            {
+                var key = Guid.NewGuid().ToString();
+                var handleInfo = string.Join("\nh: ", cache.CacheHandles.Select(p => p.Configuration.Name + ":" + p.GetType().Name));
+
+                cache.Remove(key);
+                cache.Add(key, new RaceConditionTestElement() { Counter = 0 });
+                int numThreads = 5;
+                int iterations = 10;
+                int numInnerIterations = 10;
+                int countCasModifyCalls = 0;
+
+                // act
+                ThreadTestHelper.Run(
+                    () =>
+                    {
+                        for (int i = 0; i < numInnerIterations; i++)
+                        {
+                            cache.Update(key, (value) =>
+                            {
+                                var val = (RaceConditionTestElement)value;
+                                val.Counter++;
+                                Interlocked.Increment(ref countCasModifyCalls);
+                                return value;
+                            });
+                        }
+                    },
+                    numThreads,
+                    iterations);
+
+                // assert
+                Thread.Sleep(10);
+                for (var i = 0; i < cache.CacheHandles.Count(); i++)
+                {
+                    var handle = cache.CacheHandles.ElementAt(i);
+                    var result = (RaceConditionTestElement)handle.Get(key);
+                    if (i < cache.CacheHandles.Count() - 1)
+                    {
+                        // only the last one should have the item
+                        result.Should().BeNull();
+                    }
+                    else
+                    {
+                        result.Should().NotBeNull(handleInfo + "\ncurrent: " + handle.Configuration.Name + ":" + handle.GetType().Name);
+                        result.Counter.Should().Be(numThreads * numInnerIterations * iterations, handleInfo + "\ncounter should be exactly the expected value.");
+                        countCasModifyCalls.Should().BeGreaterOrEqualTo((int)result.Counter, handleInfo + "\nexpecting no (if synced) or some version collisions.");
+                    }
+                }
+            }
+        }
+
         [Theory]
         [MemberData("TestCacheManagers")]
         public void Thread_RandomAccess(ICacheManager<object> cache)

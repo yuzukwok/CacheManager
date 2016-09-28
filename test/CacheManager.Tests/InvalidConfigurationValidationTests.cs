@@ -1,4 +1,5 @@
-﻿using System;
+﻿#if !DNXCORE50
+using System;
 using System.Configuration;
 using System.Diagnostics.CodeAnalysis;
 using CacheManager.Core;
@@ -62,12 +63,10 @@ namespace CacheManager.Tests
                 .WithMessage("*Parameter name: configName");
         }
 
-#if DNX451
-        [Fact(Skip = "DNX doesn't read from app.config")]
-#else
+#if !NO_APP_CONFIG
         [Fact]
-#endif
         [ReplaceCulture]
+        [Trait("category", "NotOnMono")]
         public void Cfg_LoadConfiguration_NotExistingCacheCfgName()
         {
             // arrange
@@ -80,6 +79,7 @@ namespace CacheManager.Tests
             act.ShouldThrow<InvalidOperationException>()
                 .WithMessage("No cache manager configuration found for name*");
         }
+#endif
 
         [Fact]
         [ReplaceCulture]
@@ -476,32 +476,63 @@ namespace CacheManager.Tests
 
         [Fact]
         [ReplaceCulture]
-        public void Cfg_InvalidCfgFile_BackPlateNameButNoType()
+        public void Cfg_InvalidCfgFile_BackplaneNameButNoType()
         {
             // arrange
-            string fileName = GetCfgFileName(@"/Configuration/configuration.invalid.backPlateNameNoType.config");
+            string fileName = GetCfgFileName(@"/Configuration/configuration.invalid.backplaneNameNoType.config");
 
             // act
             Action act = () => ConfigurationBuilder.LoadConfigurationFile(fileName, "c1");
 
             // assert
             act.ShouldThrow<InvalidOperationException>()
-                .WithMessage("BackPlateType cannot be null if BackPlateName is specified.");
+                .WithMessage("Backplane type cannot be null if backplane name is specified.");
         }
 
         [Fact]
         [ReplaceCulture]
-        public void Cfg_InvalidCfgFile_BackPlateTypeButNoName()
+        public void Cfg_InvalidCfgFile_BackplaneTypeButNoName()
         {
             // arrange
-            string fileName = GetCfgFileName(@"/Configuration/configuration.invalid.backPlateTypeNoName.config");
+            string fileName = GetCfgFileName(@"/Configuration/configuration.invalid.backplaneTypeNoName.config");
 
             // act
             Action act = () => ConfigurationBuilder.LoadConfigurationFile(fileName, "c1");
 
             // assert
             act.ShouldThrow<InvalidOperationException>()
-                .WithMessage("BackPlateName cannot be null if BackPlateType is specified.");
+                .WithMessage("Backplane name cannot be null if backplane type is specified.");
+        }
+
+        [Fact]
+        [ReplaceCulture]
+        public void Cfg_InvalidCfgFile_BackplaneInvalidType()
+        {
+            // arrange
+            string fileName = GetCfgFileName(@"/Configuration/configuration.invalid.backplaneTypeNoName.config");
+
+            // act
+            var cfg = ConfigurationBuilder.LoadConfigurationFile(fileName, "invalidType");
+            Action act = () => new BaseCacheManager<string>(cfg);
+
+            // assert
+            act.ShouldThrow<InvalidOperationException>()
+                .WithMessage("*does not extend from CacheBackplane*");
+        }
+
+        [Fact]
+        [ReplaceCulture]
+        public void Cfg_InvalidCfgFile_BackplaneTypeNotFound()
+        {
+            // arrange
+            string fileName = GetCfgFileName(@"/Configuration/configuration.invalid.backplaneTypeNoName.config");
+
+            // act
+            Action act = () => ConfigurationBuilder.LoadConfigurationFile(fileName, "typeNotFound");
+
+            // assert
+            act.ShouldThrow<InvalidOperationException>()
+                .WithMessage("*Backplane type not found*");
         }
 
         [Fact]
@@ -512,7 +543,7 @@ namespace CacheManager.Tests
             string fileName = GetCfgFileName(@"/Configuration/configuration.invalid.serializerType.config");
 
             // act
-            Action act = () => ConfigurationBuilder.LoadConfigurationFile(fileName, "c1");
+            Action act = () => CacheFactory.FromConfiguration<object>(ConfigurationBuilder.LoadConfigurationFile(fileName, "c1"));
 
             // assert
             act.ShouldThrow<InvalidOperationException>()
@@ -531,7 +562,7 @@ namespace CacheManager.Tests
 
             // assert
             act.ShouldThrow<InvalidOperationException>()
-                .WithMessage("*type cannot be loaded*");
+                .WithMessage("*type not found*");
         }
 
         [Fact]
@@ -547,14 +578,14 @@ namespace CacheManager.Tests
                 EnableStatistics = true,
                 MaximumRetries = 10012,
                 RetryTimeout = 234,
-                BackPlateName = "backPlate",
-                BackPlateType = typeof(string).AssemblyQualifiedName
+                BackplaneName = "backplane",
+                BackplaneType = typeof(string).AssemblyQualifiedName
             };
 
             // assert
             col.Name.Should().Be("name");
-            col.BackPlateName.Should().Be("backPlate");
-            col.BackPlateType.Should().Be(typeof(string).AssemblyQualifiedName);
+            col.BackplaneName.Should().Be("backplane");
+            col.BackplaneType.Should().Be(typeof(string).AssemblyQualifiedName);
             col.UpdateMode.Should().Be(CacheUpdateMode.Up);
             col.EnablePerformanceCounters.Should().BeTrue();
             col.EnableStatistics.Should().BeTrue();
@@ -569,7 +600,7 @@ namespace CacheManager.Tests
             // arrange act
             var col = new CacheManagerHandle()
             {
-                IsBackPlateSource = true,
+                IsBackplaneSource = true,
                 Name = "name",
                 ExpirationMode = ExpirationMode.Absolute.ToString(),
                 Timeout = "22m",
@@ -581,7 +612,7 @@ namespace CacheManager.Tests
             col.ExpirationMode.Should().Be(ExpirationMode.Absolute.ToString());
             col.Timeout.Should().Be("22m");
             col.RefHandleId.Should().Be("ref");
-            col.IsBackPlateSource.Should().BeTrue();
+            col.IsBackplaneSource.Should().BeTrue();
         }
 
         [Fact]
@@ -605,3 +636,4 @@ namespace CacheManager.Tests
         }
     }
 }
+#endif

@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Linq;
 using CacheManager.Core.Internal;
 
-#if !PORTABLE && !DOTNET5_2
+#if !NETSTANDARD
 using System.Configuration;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -24,23 +24,70 @@ namespace CacheManager.Core
     /// </para>
     /// </summary>
     /// <see cref="CacheFactory"/>
-    public static class ConfigurationBuilder
+    public class ConfigurationBuilder : ConfigurationBuilderCachePart
     {
         private const string Hours = "h";
         private const string Minutes = "m";
         private const string Seconds = "s";
 
         /// <summary>
-        /// Builds a <c>CacheManagerConfiguration</c> which can be used to create a new cache
+        /// Initializes a new instance of the <see cref="ConfigurationBuilder"/> class
+        /// which provides fluent configuration methods.
+        /// </summary>
+        public ConfigurationBuilder()
+            : base()
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ConfigurationBuilder"/> class
+        /// which provides fluent configuration methods.
+        /// </summary>
+        /// <param name="name">The name of the cache manager.</param>
+        public ConfigurationBuilder(string name)
+            : base()
+        {
+            NotNullOrWhiteSpace(name, nameof(name));
+            this.Configuration.Name = name;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ConfigurationBuilder"/> class
+        /// which provides fluent configuration methods.
+        /// Creates a builder which allows to modify the existing <paramref name="configuration"/>.
+        /// </summary>
+        /// <param name="configuration">The configuration the builder should be instantiated for.</param>
+        public ConfigurationBuilder(CacheManagerConfiguration configuration)
+            : base(configuration)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ConfigurationBuilder"/> class
+        /// which provides fluent configuration methods.
+        /// Creates a builder which allows to modify the existing <paramref name="configuration"/>.
+        /// </summary>
+        /// <param name="name">The name of the cache manager.</param>
+        /// <param name="configuration">The configuration the builder should be instantiated for.</param>
+        public ConfigurationBuilder(string name, CacheManagerConfiguration configuration)
+            : base(configuration)
+        {
+            NotNullOrWhiteSpace(name, nameof(name));
+            this.Configuration.Name = name;
+        }
+
+        /// <summary>
+        /// Builds a <see cref="CacheManagerConfiguration"/> which can be used to create a new cache
         /// manager instance.
         /// <para>
-        /// Pass the configuration to <c>CacheFactory.FromConfiguration</c> to create a valid cache manager.
+        /// Pass the configuration to <see cref="CacheFactory.FromConfiguration{TCacheValue}(CacheManagerConfiguration)"/>
+        /// to create a valid cache manager.
         /// </para>
         /// </summary>
         /// <param name="settings">
         /// The configuration settings to define the cache handles and other properties.
         /// </param>
-        /// <returns>The <c>CacheManagerConfiguration</c>.</returns>
+        /// <returns>The <see cref="CacheManagerConfiguration"/>.</returns>
         public static CacheManagerConfiguration BuildConfiguration(Action<ConfigurationBuilderCachePart> settings)
         {
             NotNull(settings, nameof(settings));
@@ -50,7 +97,31 @@ namespace CacheManager.Core
             return part.Configuration;
         }
 
-#if !PORTABLE && !DOTNET5_2
+        /// <summary>
+        /// Builds a <see cref="CacheManagerConfiguration"/> which can be used to create a new cache
+        /// manager instance.
+        /// <para>
+        /// Pass the configuration to <see cref="CacheFactory.FromConfiguration{TCacheValue}(CacheManagerConfiguration)"/>
+        /// to create a valid cache manager.
+        /// </para>
+        /// </summary>
+        /// <param name="name">The name of the cache manager.</param>
+        /// <param name="settings">
+        /// The configuration settings to define the cache handles and other properties.
+        /// </param>
+        /// <returns>The <see cref="CacheManagerConfiguration"/>.</returns>
+        public static CacheManagerConfiguration BuildConfiguration(string name, Action<ConfigurationBuilderCachePart> settings)
+        {
+            NotNullOrWhiteSpace(name, nameof(name));
+            NotNull(settings, nameof(settings));
+
+            var part = new ConfigurationBuilderCachePart();
+            settings(part);
+            part.Configuration.Name = name;
+            return part.Configuration;
+        }
+
+#if !NETSTANDARD
 
         /// <summary>
         /// Loads a configuration from web.config or app.config.
@@ -146,9 +217,6 @@ namespace CacheManager.Core
             return LoadFromSection(section, configName);
         }
 
-        // todo: refactor -> high complexity
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA2204:Literals should be spelled correctly", MessageId = "BackPlateName", Justification = "no.")]
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA2204:Literals should be spelled correctly", MessageId = "BackPlateType", Justification = "no")]
         internal static CacheManagerConfiguration LoadFromSection(CacheManagerSection section, string configName)
         {
             NotNullOrWhiteSpace(configName, nameof(configName));
@@ -193,34 +261,41 @@ namespace CacheManager.Core
             }
 
             // build configuration
-            var cfg = new CacheManagerConfiguration(managerCfg.UpdateMode, maxRetries.HasValue ? maxRetries.Value : int.MaxValue, retryTimeout.HasValue ? retryTimeout.Value : 10);
-
-            if (string.IsNullOrWhiteSpace(managerCfg.BackPlateType))
+            var cfg = new CacheManagerConfiguration()
             {
-                if (!string.IsNullOrWhiteSpace(managerCfg.BackPlateName))
+                UpdateMode = managerCfg.UpdateMode,
+                MaxRetries = maxRetries.HasValue ? maxRetries.Value : 50,
+                RetryTimeout = retryTimeout.HasValue ? retryTimeout.Value : 100
+            };
+
+            if (string.IsNullOrWhiteSpace(managerCfg.BackplaneType))
+            {
+                if (!string.IsNullOrWhiteSpace(managerCfg.BackplaneName))
                 {
-                    throw new InvalidOperationException("BackPlateType cannot be null if BackPlateName is specified.");
+                    throw new InvalidOperationException("Backplane type cannot be null if backplane name is specified.");
                 }
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(managerCfg.BackPlateName))
+                if (string.IsNullOrWhiteSpace(managerCfg.BackplaneName))
                 {
-                    throw new InvalidOperationException("BackPlateName cannot be null if BackPlateType is specified.");
+                    throw new InvalidOperationException("Backplane name cannot be null if backplane type is specified.");
                 }
 
-                cfg.WithBackPlate(
-                    Type.GetType(managerCfg.BackPlateType, true),
-                    managerCfg.BackPlateName);
+                var backplaneType = Type.GetType(managerCfg.BackplaneType, false);
+                EnsureNotNull(backplaneType, "Backplane type not found, '{0}'. Make sure to install the corresponding nuget package.", managerCfg.BackplaneType);
+
+                cfg.BackplaneType = backplaneType;
+                cfg.BackplaneConfigurationKey = managerCfg.BackplaneName;
             }
 
             // build serializer if set
             if (!string.IsNullOrWhiteSpace(managerCfg.SerializerType))
             {
                 var serializerType = Type.GetType(managerCfg.SerializerType, false);
-                EnsureNotNull(serializerType, "Serializer type cannot be loaded, {0}", managerCfg.SerializerType);
+                EnsureNotNull(serializerType, "Serializer type not found, {0}.", managerCfg.SerializerType);
 
-                cfg.WithSerializer(CacheReflectionHelper.CreateSerializer(serializerType));
+                cfg.SerializerType = serializerType;
             }
 
             foreach (CacheManagerHandle handleItem in managerCfg)
@@ -241,7 +316,7 @@ namespace CacheManager.Core
                     ExpirationTimeout = handleDef.ExpirationTimeout,
                     EnableStatistics = managerCfg.EnableStatistics,
                     EnablePerformanceCounters = managerCfg.EnablePerformanceCounters,
-                    IsBackPlateSource = handleItem.IsBackPlateSource
+                    IsBackplaneSource = handleItem.IsBackplaneSource
                 };
 
                 // override default timeout if it is defined in this section.
@@ -269,7 +344,7 @@ namespace CacheManager.Core
                         string.Format(
                             CultureInfo.InvariantCulture,
                             "Expiration mode set without a valid timeout specified for handle [{0}]",
-                            handle.HandleName));
+                            handle.Name));
                 }
 
                 cfg.CacheHandleConfigurations.Add(handle);
@@ -347,6 +422,15 @@ namespace CacheManager.Core
         internal CacheHandleConfiguration Configuration { get; }
 
         /// <summary>
+        /// Hands back the new <see cref="CacheManagerConfiguration"/> instance.
+        /// </summary>
+        /// <returns>The <see cref="CacheManagerConfiguration"/>.</returns>
+        public CacheManagerConfiguration Build()
+        {
+            return this.parent.Build();
+        }
+
+        /// <summary>
         /// Disables performance counters for this cache handle.
         /// </summary>
         /// <returns>The builder part.</returns>
@@ -421,14 +505,17 @@ namespace CacheManager.Core
     /// Used to build a <c>CacheManagerConfiguration</c>.
     /// </summary>
     /// <see cref="CacheManagerConfiguration"/>
-    public sealed class ConfigurationBuilderCachePart
+    public class ConfigurationBuilderCachePart
     {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ConfigurationBuilderCachePart"/> class.
-        /// </summary>
         internal ConfigurationBuilderCachePart()
         {
             this.Configuration = new CacheManagerConfiguration();
+        }
+
+        internal ConfigurationBuilderCachePart(CacheManagerConfiguration forConfiguration)
+        {
+            NotNull(forConfiguration, nameof(forConfiguration));
+            this.Configuration = forConfiguration;
         }
 
         /// <summary>
@@ -438,28 +525,63 @@ namespace CacheManager.Core
         internal CacheManagerConfiguration Configuration { get; }
 
         /// <summary>
-        /// Configures the back plate for the cache manager.
+        /// Configures the backplane for the cache manager.
         /// <para>
         /// This is an optional feature. If specified, see the documentation for the
-        /// <typeparamref name="TBackPlate"/>. The <paramref name="name"/> might be used to
+        /// <paramref name="backplaneType"/>. The <paramref name="configurationKey"/> might be used to
         /// reference another configuration item.
         /// </para>
         /// <para>
-        /// If a back plate is defined, at least one cache handle must be marked as back plate
+        /// If a backplane is defined, at least one cache handle must be marked as backplane
         /// source. The cache manager then will try to synchronize multiple instances of the same configuration.
         /// </para>
         /// </summary>
-        /// <typeparam name="TBackPlate">The type of the back plate implementation.</typeparam>
-        /// <param name="name">The name.</param>
+        /// <param name="backplaneType">The type of the backplane implementation.</param>
+        /// <param name="configurationKey">The name.</param>
+        /// <param name="args">Additional arguments the type might need to get initialized.</param>
         /// <returns>The builder instance.</returns>
-        /// <exception cref="System.ArgumentNullException">If name is null.</exception>
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1004:GenericMethodsShouldProvideTypeParameter", Justification = "Users should use the extensions.")]
-        public ConfigurationBuilderCachePart WithBackPlate<TBackPlate>(string name)
-            where TBackPlate : CacheBackPlate
+        /// <exception cref="System.ArgumentNullException">If <paramref name="configurationKey"/> is null.</exception>
+        public ConfigurationBuilderCachePart WithBackplane(Type backplaneType, string configurationKey, params object[] args)
         {
-            NotNullOrWhiteSpace(name, nameof(name));
+            NotNull(backplaneType, nameof(backplaneType));
+            NotNullOrWhiteSpace(configurationKey, nameof(configurationKey));
 
-            this.Configuration.WithBackPlate(typeof(TBackPlate), name);
+            this.Configuration.BackplaneType = backplaneType;
+            this.Configuration.BackplaneTypeArguments = args;
+            this.Configuration.BackplaneConfigurationKey = configurationKey;
+            return this;
+        }
+
+        /// <summary>
+        /// Configures the backplane for the cache manager.
+        /// <para>
+        /// This is an optional feature. If specified, see the documentation for the
+        /// <paramref name="backplaneType"/>. The <paramref name="configurationKey"/> might be used to
+        /// reference another configuration item.
+        /// </para>
+        /// <para>
+        /// If a backplane is defined, at least one cache handle must be marked as backplane
+        /// source. The cache manager then will try to synchronize multiple instances of the same configuration.
+        /// </para>
+        /// </summary>
+        /// <param name="backplaneType">The type of the backplane implementation.</param>
+        /// <param name="configurationKey">The configuration key.</param>
+        /// <param name="channelName">The backplane channel name.</param>
+        /// <param name="args">Additional arguments the type might need to get initialized.</param>
+        /// <returns>The builder instance.</returns>
+        /// <exception cref="System.ArgumentNullException">
+        /// If <paramref name="configurationKey"/> or <paramref name="channelName"/> is null.
+        /// </exception>
+        public ConfigurationBuilderCachePart WithBackplane(Type backplaneType, string configurationKey, string channelName, params object[] args)
+        {
+            NotNull(backplaneType, nameof(backplaneType));
+            NotNullOrWhiteSpace(configurationKey, nameof(configurationKey));
+            NotNullOrWhiteSpace(channelName, nameof(channelName));
+
+            this.Configuration.BackplaneType = backplaneType;
+            this.Configuration.BackplaneTypeArguments = args;
+            this.Configuration.BackplaneChannelName = channelName;
+            this.Configuration.BackplaneConfigurationKey = configurationKey;
             return this;
         }
 
@@ -485,19 +607,19 @@ namespace CacheManager.Core
         /// </summary>
         /// <param name="cacheHandleBaseType">The cache handle type.</param>
         /// <param name="handleName">The name to be used for the cache handle.</param>
-        /// <param name="isBackPlateSource">
-        /// Set this to true if this cache handle should be the source of the back plate.
-        /// <para>This setting will be ignored if no back plate is configured.</para>
+        /// <param name="isBackplaneSource">
+        /// Set this to true if this cache handle should be the source of the backplane.
+        /// <para>This setting will be ignored if no backplane is configured.</para>
         /// </param>
         /// <returns>The builder part.</returns>
         /// <exception cref="System.ArgumentNullException">If handleName is null.</exception>
         /// <exception cref="System.InvalidOperationException">
-        /// Only one cache handle can be the backplate's source.
+        /// Only one cache handle can be the backplane's source.
         /// </exception>
         /// <exception cref="ArgumentNullException">
         /// Thrown if handleName or cacheHandleBaseType are null.
         /// </exception>
-        public ConfigurationBuilderCacheHandlePart WithHandle(Type cacheHandleBaseType, string handleName, bool isBackPlateSource)
+        public ConfigurationBuilderCacheHandlePart WithHandle(Type cacheHandleBaseType, string handleName, bool isBackplaneSource)
         {
             NotNull(cacheHandleBaseType, nameof(cacheHandleBaseType));
             NotNullOrWhiteSpace(handleName, nameof(handleName));
@@ -507,11 +629,11 @@ namespace CacheManager.Core
                 HandleType = cacheHandleBaseType
             };
 
-            handleCfg.IsBackPlateSource = isBackPlateSource;
+            handleCfg.IsBackplaneSource = isBackplaneSource;
 
-            if (this.Configuration.CacheHandleConfigurations.Any(p => p.IsBackPlateSource))
+            if (isBackplaneSource && this.Configuration.CacheHandleConfigurations.Any(p => p.IsBackplaneSource))
             {
-                throw new InvalidOperationException("Only one cache handle can be the back plate's source.");
+                throw new InvalidOperationException("Only one cache handle can be the backplane's source.");
             }
 
             this.Configuration.CacheHandleConfigurations.Add(handleCfg);
@@ -546,7 +668,7 @@ namespace CacheManager.Core
 
         /// <summary>
         /// Sets the maximum number of retries per action.
-        /// <para>Default is <see cref="int.MaxValue"/>.</para>
+        /// <para>Default is 50.</para>
         /// <para>
         /// Not every cache handle implements this, usually only distributed caches will use it.
         /// </para>
@@ -566,7 +688,7 @@ namespace CacheManager.Core
 
         /// <summary>
         /// Sets the timeout between each retry of an action in milliseconds.
-        /// <para>Default is 10.</para>
+        /// <para>Default is 100.</para>
         /// <para>
         /// Not every cache handle implements this, usually only distributed caches will use it.
         /// </para>
@@ -593,7 +715,7 @@ namespace CacheManager.Core
         /// <seealso cref="CacheUpdateMode"/>
         public ConfigurationBuilderCachePart WithUpdateMode(CacheUpdateMode updateMode)
         {
-            this.Configuration.CacheUpdateMode = updateMode;
+            this.Configuration.UpdateMode = updateMode;
             return this;
         }
 
@@ -601,14 +723,39 @@ namespace CacheManager.Core
         /// Sets the serializer which should be used to serialize cache items.
         /// </summary>
         /// <param name="serializerType">The type of the serializer.</param>
-        /// <param name="args">The optional arguments to activate the serializer.</param>
+        /// <param name="args">Additional arguments the type might need to get initialized.</param>
         /// <returns>The builder part.</returns>
         public ConfigurationBuilderCachePart WithSerializer(Type serializerType, params object[] args)
         {
-            var instance = CacheReflectionHelper.CreateSerializer(serializerType, args);
+            NotNull(serializerType, nameof(serializerType));
 
-            this.Configuration.WithSerializer(instance);
+            this.Configuration.SerializerType = serializerType;
+            this.Configuration.SerializerTypeArguments = args;
             return this;
+        }
+
+        /// <summary>
+        /// Enables logging by setting the <see cref="Logging.ILoggerFactory"/> for the cache manager instance.
+        /// </summary>
+        /// <param name="loggerFactoryType">The type of the logger factory.</param>
+        /// <param name="args">Additional arguments the type might need to get initialized.</param>
+        /// <returns>The builder part.</returns>
+        public ConfigurationBuilderCachePart WithLogging(Type loggerFactoryType, params object[] args)
+        {
+            NotNull(loggerFactoryType, nameof(loggerFactoryType));
+
+            this.Configuration.LoggerFactoryType = loggerFactoryType;
+            this.Configuration.LoggerFactoryTypeArguments = args;
+            return this;
+        }
+
+        /// <summary>
+        /// Hands back the new <see cref="CacheManagerConfiguration"/> instance.
+        /// </summary>
+        /// <returns>The <see cref="CacheManagerConfiguration"/>.</returns>
+        public CacheManagerConfiguration Build()
+        {
+            return this.Configuration;
         }
     }
 }

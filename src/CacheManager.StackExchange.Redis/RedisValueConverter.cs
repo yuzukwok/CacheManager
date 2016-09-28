@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections;
+using System.Linq;
 using CacheManager.Core.Internal;
 using static CacheManager.Core.Utility.Guard;
 using StackRedis = StackExchange.Redis;
@@ -43,6 +45,8 @@ namespace CacheManager.Redis
         private static readonly Type BoolType = typeof(bool);
         private static readonly Type LongType = typeof(long);
         private readonly ICacheSerializer serializer;
+        private readonly Hashtable types = new Hashtable();
+        private readonly object typesLock = new object();
 
         public RedisValueConverter(ICacheSerializer serializer)
         {
@@ -113,40 +117,42 @@ namespace CacheManager.Redis
             return this.serializer.Serialize(value);
         }
 
-        object IRedisValueConverter<object>.FromRedisValue(StackRedis.RedisValue value, string valueType)
+        object IRedisValueConverter<object>.FromRedisValue(StackRedis.RedisValue value, string type)
         {
-            if (valueType == ByteArrayType.AssemblyQualifiedName)
+            var valueType = this.GetType(type);
+
+            if (valueType == ByteArrayType)
             {
                 var converter = (IRedisValueConverter<byte[]>)this;
-                return converter.FromRedisValue(value, valueType);
+                return converter.FromRedisValue(value, type);
             }
-            else if (valueType == StringType.AssemblyQualifiedName)
+            else if (valueType == StringType)
             {
                 var converter = (IRedisValueConverter<string>)this;
-                return converter.FromRedisValue(value, valueType);
+                return converter.FromRedisValue(value, type);
             }
-            else if (valueType == IntType.AssemblyQualifiedName)
+            else if (valueType == IntType)
             {
                 var converter = (IRedisValueConverter<int>)this;
-                return converter.FromRedisValue(value, valueType);
+                return converter.FromRedisValue(value, type);
             }
-            else if (valueType == DoubleType.AssemblyQualifiedName)
+            else if (valueType == DoubleType)
             {
                 var converter = (IRedisValueConverter<double>)this;
-                return converter.FromRedisValue(value, valueType);
+                return converter.FromRedisValue(value, type);
             }
-            else if (valueType == BoolType.AssemblyQualifiedName)
+            else if (valueType == BoolType)
             {
                 var converter = (IRedisValueConverter<bool>)this;
-                return converter.FromRedisValue(value, valueType);
+                return converter.FromRedisValue(value, type);
             }
-            else if (valueType == LongType.AssemblyQualifiedName)
+            else if (valueType == LongType)
             {
                 var converter = (IRedisValueConverter<long>)this;
-                return converter.FromRedisValue(value, valueType);
+                return converter.FromRedisValue(value, type);
             }
 
-            return this.Deserialize(value, valueType);
+            return this.Deserialize(value, type);
         }
 
         public StackRedis.RedisValue ToRedisValue<T>(T value) => this.serializer.Serialize(value);
@@ -155,10 +161,35 @@ namespace CacheManager.Redis
 
         private object Deserialize(StackRedis.RedisValue value, string valueType)
         {
-            var type = Type.GetType(valueType, false);
+            var type = this.GetType(valueType);
             EnsureNotNull(type, "Type could not be loaded, {0}.", valueType);
 
             return this.serializer.Deserialize(value, type);
+        }
+
+        private Type GetType(string type)
+        {
+            if (!this.types.ContainsKey(type))
+            {
+                lock (this.typesLock)
+                {
+                    if (!this.types.ContainsKey(type))
+                    {
+                        var typeResult = Type.GetType(type, false);
+                        if (typeResult == null)
+                        {
+                            // fixing an issue for corlib types if mixing net core clr and full clr calls 
+                            // (e.g. typeof(string) is different for those two, either System.String, System.Private.CoreLib or System.String, mscorlib)
+                            var typeName = type.Split(',').FirstOrDefault();
+                            typeResult = Type.GetType(typeName, true);
+                        }
+
+                        this.types.Add(type, typeResult);
+                    }
+                }
+            }
+
+            return (Type)this.types[type];
         }
     }
 }
